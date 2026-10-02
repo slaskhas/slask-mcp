@@ -15,8 +15,7 @@
 //                               else `<name>__<toolName>` on collision
 
 import fs from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { close, connect, connectStdio, listTools } from "./client.js";
 import type {
@@ -30,10 +29,12 @@ import type {
   Warning,
 } from "./types.js";
 
-const clientDir = dirname(fileURLToPath(import.meta.url));
-
-/** The default config file, relative to the client (not the cwd). */
-export const DEFAULT_CONFIG_PATH = join(clientDir, "mcp.json");
+/**
+ * The default config file: `mcp.json` in the current working directory
+ * (where `slask-client` is launched). Overridden by `--config`/`-c` or the
+ * `SLASK_MCP_CONFIG` env var.
+ */
+export const DEFAULT_CONFIG_PATH = join(process.cwd(), "mcp.json");
 
 /**
  * Pick the config path from (in order) an explicit flag, an env var, or the

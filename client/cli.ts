@@ -10,8 +10,8 @@
 // The default slask server is configured via --url/--token (or
 // SLASK_MCP_URL/SLASK_MCP_TOKEN) and is always included (named "slask") unless
 // --no-default. Additional servers — HTTP or stdio, any number — come from a
-// JSON config file (default client/mcp.json; override with --config/-c or
-// SLASK_MCP_CONFIG).
+// JSON config file (default: mcp.json in the current dir; override with
+// --config/-c or SLASK_MCP_CONFIG).
 //
 // Chat (OpenAI agent) config — any OpenAI-compatible endpoint:
 //   --base-url / -b <url>       base URL (chat); overrides API_BASE
@@ -23,6 +23,7 @@
 //                               local server (e.g. Ollama) is used with a
 //                               placeholder key
 
+import { resolve } from "node:path";
 import { startChat } from "./ui.js";
 import { hintFor, printTools, textFrom } from "./client.js";
 import {
@@ -32,6 +33,7 @@ import {
   connectAllServers,
   loadConfigServers,
 } from "./servers.js";
+import { loadEnvFile } from "./env.js";
 import { DEFAULT_MODEL } from "./agent.js";
 import type { CallToolResult, HttpSpec, Registry, ServerSpec } from "./types.js";
 
@@ -55,11 +57,12 @@ Usage:
 Options:
   -u, --url <url>        Default (slask) server endpoint (default: ${DEFAULT_URL})
   -t, --token <token>    Bearer token for the default server
-  -c, --config <path>    MCP servers config file (JSON; default: mcp.json in the client dir)
+  -c, --config <path>    MCP servers config file (JSON; default: mcp.json in the current dir)
       --no-default       Do not include the default slask server
   -m, --model <model>    OpenAI model (chat mode; default: gpt-4o-mini)
   -b, --base-url <url>   OpenAI-compatible base URL (chat; overrides API_BASE)
-  Env vars: SLASK_MCP_URL, SLASK_MCP_TOKEN (default server); SLASK_MCP_CONFIG
+  Env vars (a .env file in the current dir is read on startup; shell values
+  win): SLASK_MCP_URL, SLASK_MCP_TOKEN (default server); SLASK_MCP_CONFIG
              (config file); API_BASE (default https://api.openai.com),
              MODEL/OPENAI_MODEL, OPENAI_API_KEY (chat). A local OpenAI-compatible
              server (e.g. Ollama) needs no API key.
@@ -67,7 +70,8 @@ Options:
 Multiple servers:
   The default slask HTTP server is always included (named "slask", from
   --url / SLASK_MCP_URL). To add servers, copy client/mcp.example.json to
-  client/mcp.json and list entries — each is a full server spec. Any number
+  mcp.json in the current directory and list entries — each is a full server
+  spec. Any number
   of servers is allowed:
       {"name":"weather","type":"stdio","command":"/path/weather-mcp","args":["--verbose"],"env":{"KEY":""}}
       {"name":"cal","type":"http","url":"http://host:9001/mcp","token":"secret"}
@@ -186,6 +190,9 @@ function printResult(result: CallToolResult): void {
 }
 
 async function main(): Promise<void> {
+  // Read .env from the current working directory before flag parsing, so its
+  // values reach env-var-based flags (shell env wins over the file).
+  loadEnvFile(resolve(process.cwd(), ".env"));
   const config = parse(process.argv.slice(2));
   const sub = config.positional[0];
 

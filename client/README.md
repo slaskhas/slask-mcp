@@ -20,8 +20,9 @@ Prerequisites:
 1. In the `client` directory, run `npm install`.
 2. Run `npm run build` — compiles the `.ts` source to `dist/*.js` (what the
    `slask-client` binary points at). Re-run after any source change.
-3. (Optional) copy `client/.env.example` to `client/.env` and fill in your
-   values (see `client/.env.example`).
+3. (Optional) copy `client/.env.example` to `.env` in the directory where you
+   run `slask-client` and fill in your values (see `client/.env.example`). The
+   client reads that `.env` on startup; shell environment wins over it.
 
 After the build, `slask-client` (the package `bin` → `dist/cli.js`) is available
 via `npx slask-client …` or a local install (`npm link`) from the `client`
@@ -48,11 +49,11 @@ addition to any servers you list in a JSON config file. There is **no fixed
 limit** on how many you can add; each entry is a complete, self-contained
 spec.
 
-The default config path is `client/mcp.json` (next to `cli.js`, not the current
-directory). Override it with `--config`/`-c` or the `SLASK_MCP_CONFIG` env var.
-A missing *default* file simply means "no extra servers"; a missing *explicitly
-given* file is an error. Copy `client/mcp.example.json` to `client/mcp.json`
-to get started:
+The default config path is `mcp.json` in the current working directory (where
+`slask-client` is launched). Override it with `--config`/`-c` or the
+`SLASK_MCP_CONFIG` env var. A missing *default* file simply means "no extra
+servers"; a missing *explicitly given* file is an error. Copy
+`client/mcp.example.json` to `mcp.json` in your current directory to get started:
 
 ```json
 {
@@ -158,6 +159,7 @@ Warnings about unreachable servers are printed to stderr; the exit code is 1 on 
 |-------------------|-----|----------------|-------------------------------------------------------------------------------------------------------------|
 | -u, --url <url>   | -u  |                | MCP server endpoint (default: http://127.0.0.1:8000/mcp)                                                    |
 | -t, --token <tok> | -t  | SLASK_MCP_TOKEN| bearer token for the default server (required when the server is set up with a token; otherwise leave blank)|
+| -c, --config <path> | -c  | SLASK_MCP_CONFIG| extra servers (JSON); default: `mcp.json` in the current dir; explicit missing file = error, missing default = no extra servers |
 | -m, --model <name>| -m  | MODEL          | openai model (chat; default: gpt-4o-mini)                                                                   |
 | --base-url <url>  |     | API_BASE       | openai base url (chat; default: https://api.openai.com)                                                     |
 | OPENAI_API_KEY    |     | OPENAI_API_KEY | openai api key; only needed for the real openai endpoint (see API_BASE note)                                |
