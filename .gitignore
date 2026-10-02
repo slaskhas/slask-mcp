@@ -1,5 +1,6 @@
 target/
 client/dist/
+client/external/
 node_modules/
 .env
 
