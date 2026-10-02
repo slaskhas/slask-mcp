@@ -69,9 +69,10 @@ After a build, three equivalent ways to launch the CLI — all of them run
 | Global | `npm link` in `client/`, then `slask-client list` | Puts `slask-client` on your `PATH` from anywhere |
 
 `slask-client help` (or `--help`) prints the full command reference. For
-agent chat, configure the model via `client/.env` (copy
-`client/.env.example` first — it lists `SLASK_MCP_URL`, `API_BASE`, `MODEL`,
-`OPENAI_API_KEY`), env vars, or flags; every setting is covered in the
+agent chat, configure the model via a `.env` file in the current working
+directory (copy `client/.env.example` to `./.env` first — it lists
+`SLASK_MCP_URL`, `API_BASE`, `MODEL`, `OPENAI_API_KEY`), env vars, or
+flags; shell env wins over the file; every setting is covered in the
 **Options & environment** section below.
 
 Typical first run, once the slask server is up (see **Start the server**
@@ -103,11 +104,12 @@ addition to any servers you list in a JSON config file. There is **no fixed
 limit** on how many you can add; each entry is a complete, self-contained
 spec.
 
-The default config path is `client/mcp.json` (next to `cli.js`, not the current
-directory). Override it with `--config`/`-c` or the `SLASK_MCP_CONFIG` env var.
-A missing *default* file simply means "no extra servers"; a missing *explicitly
-given* file is an error. Copy `client/mcp.example.json` to `client/mcp.json`
-to get started:
+The default config path is `mcp.json` in the current working directory (where
+`slask-client` is launched). Override it with `--config`/`-c` or the
+`SLASK_MCP_CONFIG` env var. A missing *default* file simply means "no extra
+servers"; a missing *explicitly* given file is an error. Copy
+`client/mcp.example.json` to `mcp.json` in your current directory to get
+started:
 
 ```json
 {
@@ -215,6 +217,7 @@ Warnings about unreachable servers are printed to stderr; the exit code is 1 on 
 | -t, --token <tok> | -t  | SLASK_MCP_TOKEN| bearer token for the default server (required when the server is set up with a token; otherwise leave blank)|
 | -m, --model <name>| -m  | MODEL          | openai model (chat; default: gpt-4o-mini)                                                                   |
 | --base-url <url>  |     | API_BASE       | openai base url (chat; default: https://api.openai.com)                                                     |
+| -c, --config <path>| -c  | SLASK_MCP_CONFIG| extra servers (JSON); default: mcp.json in the current dir; missing explicit file is an error; missing default = no extra servers |
 | OPENAI_API_KEY    |     | OPENAI_API_KEY | openai api key; only needed for the real openai endpoint (see API_BASE note)                                |
 |                   |     | OPENAI_MODEL   | legacy model name (checked after MODEL)                                                                     |
 
