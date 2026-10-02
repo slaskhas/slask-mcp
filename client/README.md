@@ -7,25 +7,61 @@ function-calling) or by hand (`list` / `call`).
 
 ## Setup
 
-The client is written in **TypeScript** and compiled to `client/dist` by the
-TypeScript compiler. It is a Node.js ESM CLI (`"type": "module"`) that talks to
-MCP servers over streamable HTTP or raw stdio.
+The client is a **TypeScript** Node.js ESM CLI (`"type": "module"`, Node v20+
+required) that talks to MCP servers over streamable HTTP or raw stdio. The
+source lives in `client/*.ts`; the runnable program is the compiled
+`client/dist/` — so the build must be (re)done before running.
 
-Prerequisites:
+### 1. Prerequisites
 
-- A recent Node.js (v20+) with `npm`
+- Node.js v20+ with `npm`
 
-### Install & build
+### 2. Install
 
-1. In the `client` directory, run `npm install`.
-2. Run `npm run build` — compiles the `.ts` source to `dist/*.js` (what the
-   `slask-client` binary points at). Re-run after any source change.
-3. (Optional) copy `client/.env.example` to `client/.env` and fill in your
-   values (see `client/.env.example`).
+```bash
+cd client
+npm install
+```
 
-After the build, `slask-client` (the package `bin` → `dist/cli.js`) is available
-via `npx slask-client …` or a local install (`npm link`) from the `client`
-directory.
+### 3. Build
+
+```bash
+npm run build
+```
+
+Compiles every `.ts` file to `client/dist/*.js`. The `slask-client` binary is
+`dist/cli.js` (the `bin` entry in `package.json`). Re-run this after every
+source change.
+
+```bash
+npm run typecheck   # type-checks without emitting anything
+npm run clean       # deletes dist/ (then rebuild)
+```
+
+### 4. Running the client
+
+After a build, three equivalent ways to launch the CLI — all of them run
+`client/dist/cli.js`:
+
+| Way | Command | When |
+|-----|---------|------|
+| `npx` (recommended) | `npx slask-client list` | From inside `client/`; resolves the local package's `bin` entry, nothing to install |
+| Direct | `node dist/cli.js list` | Always works once built; no npm resolution step |
+| Global | `npm link` in `client/`, then `slask-client list` | Puts `slask-client` on your `PATH` from anywhere |
+
+`slask-client help` (or `--help`) prints the full command reference. For
+agent chat, configure the model via `client/.env` (copy
+`client/.env.example` first — it lists `SLASK_MCP_URL`, `API_BASE`, `MODEL`,
+`OPENAI_API_KEY`), env vars, or flags; every setting is covered in the
+**Options & environment** section below.
+
+Typical first run, once the slask server is up (see **Start the server**
+below):
+
+```bash
+npx slask-client list                        # can the client see the tools?
+npx slask-client call echo --message hello
+```
 
 
 ## Start the server
