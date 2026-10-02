@@ -38,7 +38,26 @@ npm run typecheck   # type-checks without emitting anything
 npm run clean       # deletes dist/ (then rebuild)
 ```
 
-### 4. Running the client
+### 4. (Optional) Global command — `npm link`
+
+If you want `slask-client` to work from **any** directory, not just
+`client/`, make it a global command once (run from `client/`):
+
+```bash
+npm link
+```
+
+This symlinks this directory into npm's global prefix and drops a
+`slask-client` launcher script in the global `bin` directory, so
+`slask-client …` runs from any terminal. Because it's a symlink, the
+global command always executes the latest `dist/` build — after a source
+change, re-run `npm run build`, but you never need to re-link. Undo with
+`npm unlink` (from `client/`).
+
+If you only ever run from inside `client/`, skip this step — `npx
+slask-client …` covers it.
+
+### 5. Running the client
 
 After a build, three equivalent ways to launch the CLI — all of them run
 `client/dist/cli.js`:
