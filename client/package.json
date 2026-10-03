@@ -13,6 +13,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "node dist/agent-stub-test.js",
+    "test:skills": "node dist/skills-stub-test.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {
