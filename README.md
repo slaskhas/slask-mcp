@@ -50,8 +50,9 @@ curl -s -X POST http://127.0.0.1:9000/mcp \
 other MCP server) usable by a language model. It connects to the slask server
 over streamable HTTP and — via a JSON config file with **no fixed limit** on
 entries — to any number of additional stdio or HTTP MCP servers. It reads
-`.env` and `mcp.json` from the directory it is launched in by default
-(`--config` overrides the config path). To build and use it: `npm install
+`.env` and `mcp.json` from the directory it is launched in by default, and
+discovers local skills from the `skills/` directory there (prompt-only).
+`--config` overrides the config path. To build and use it: `npm install
 && npm run build` in the `client/` directory, then
 `npx slask-client …` from `client/` (or `node dist/cli.js …`; `npm link` for a
 global binary). See [`client/README.md`](client/README.md) for the full

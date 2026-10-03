@@ -188,6 +188,7 @@ slask-agent >
 |--------|-----------------------------------------------|
 | /help  | show REPL help                                |
 | /tools | list all tools (across every connected server)|
+| /skills | list local skills (./skills/)                 |
 | /reset | clear the conversation history                |
 | /quit  | exit the REPL (or /exit, /q, Ctrl+C)          |
 
@@ -208,6 +209,44 @@ slask-client call echo --args '{"message": "hi"}'
 ```
 
 Warnings about unreachable servers are printed to stderr; the exit code is 1 on failure.
+
+## Skills
+
+The client also picks up **skills**: directories under `./skills/` (the
+directory where `slask-client` was launched) containing a `SKILL.md` file —
+the same convention Claude Code uses for skills, so skills copied from
+`~/.claude/skills/` drop in unchanged.
+
+`SKILL.md` may start with an optional YAML frontmatter block:
+
+    ---
+    name: my-skill      # optional — defaults to the directory name
+    description: …      # one-liner the model reads to decide when to use it
+    disabled: true      # optional — skip this skill entirely
+    ---
+
+followed by the full markdown instructions (the skill's *body*). Only `name`
+and `description` are ever put in the model's context at startup (they are
+shown in the banner and under "Available skills" in the system prompt). When
+the task looks like it matches a description, the agent calls the
+`invoke_skill` tool with the skill name; only then is the full body sent to
+the model, together with any other text files bundled in the skill directory
+(loaded relative to the `SKILL.md`, e.g. `references/notes.md`). That
+laziness keeps context lean for small local models: bundled files are capped
+at 16 KiB each and the returned text at 32 KiB per call.
+
+Skills are **advisory prompt material only**: the client never executes any
+script or command a skill references — no execution surface is added. A
+missing `./skills/` (or an empty one) is a silent no-op; `disabled: true`
+skills, duplicate names (first directory alphabetically wins), flat files, and
+directories without a `SKILL.md` are all skipped.
+
+Inspect skills without a model or an MCP connection:
+
+    slask-client skill list          # name + description of each skill
+    slask-client skill show example  # body + bundled files
+
+The chat REPL has a `/skills` command that lists the same information.
 
 ## Options & environment
 

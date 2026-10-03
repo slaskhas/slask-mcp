@@ -5,6 +5,8 @@
 //   slask-client chat            same
 //   slask-client list            list all tools (across every connected server)
 //   slask-client call <tool> …   call a tool directly and print its result
+//   slask-client skill list      list local skills (./skills/)
+//   slask-client skill show <n>  show a skill's body and bundled files
 //   slask-client help
 //
 // The default slask server is configured via --url/--token (or
@@ -35,6 +37,7 @@ import {
   loadConfigServers,
 } from "./servers.js";
 import { DEFAULT_MODEL } from "./agent.js";
+import { discoverSkills, invokeSkill } from "./skills.js";
 import type { CallToolResult, HttpSpec, Registry, ServerSpec } from "./types.js";
 
 const DEFAULT_URL = "http://127.0.0.1:8000/mcp";
@@ -51,6 +54,12 @@ Usage:
         --args '<json>'   JSON object of arguments
         --message <text>  echo: the message to echo
         --query <text>    search_tools: the search query
+  slask-client skill list
+      List local skills from ./skills/ (name + description). No MCP
+      connection is made.
+  slask-client skill show <name>
+      Show a skill's body and its bundled files (paths relative to the
+      skill's SKILL.md). No MCP connection is made.
   slask-client help
       Show this help (also: --help).
 
@@ -108,6 +117,39 @@ interface CliConfig {
 function fail(msg: string): never {
   console.error(msg);
   process.exit(1);
+}
+
+async function handleSkillCommand(config: CliConfig): Promise<void> {
+  const subcmd = config.positional[1];
+  const name = config.positional[2];
+  const skills = await discoverSkills(process.cwd());
+  if (subcmd === undefined) fail("usage: skill list | skill show <name>");
+  if (subcmd === "list") {
+    const dir = resolve(process.cwd(), "skills");
+    console.log(`${skills.length} skill(s) in ${dir}:\n`);
+    if (skills.length > 0) {
+      for (const s of skills) {
+        console.log(`  ${s.name} — ${s.description}`);
+      }
+    } else {
+      console.log("  (none found)");
+    }
+    return;
+  }
+  if (subcmd === "show") {
+    if (name === undefined) fail("usage: skill show <name>");
+    const skill = skills.find((s) => s.name === name);
+    if (!skill) {
+      fail(
+        `no skill named "${name}" (available: ${
+          skills.length ? skills.map((s) => s.name).join(", ") : "none"
+        })`
+      );
+    }
+    console.log(await invokeSkill(skills, name));
+    return;
+  }
+  fail(`unknown skill command: ${subcmd} (try "list" or "show <name>")`);
 }
 
 // Hand-rolled flag/positional parsing (no dependencies).
@@ -203,8 +245,20 @@ async function main(): Promise<void> {
     return;
   }
 
+  // `skill` only reads local files — dispatch it before touching any server.
+  if (sub === "skill") {
+    await handleSkillCommand(config);
+    return;
+  }
+
   // Fail fast on an unknown command before touching any server.
-  if (sub !== "" && sub !== "chat" && sub !== "list" && sub !== "call") {
+  if (
+    sub !== undefined &&
+    sub !== "" &&
+    sub !== "chat" &&
+    sub !== "list" &&
+    sub !== "call"
+  ) {
     fail(`unknown command: ${sub}\n\n${HELP}`);
     return;
   }

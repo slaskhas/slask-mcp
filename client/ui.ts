@@ -7,7 +7,7 @@
 // spinner and a dependency-free color/ANSI helper. Built on node:readline only
 // (no TUI lib).
 //
-// REPL commands: /help /h  /tools /t  /reset /clear /c  /quit /exit /q
+// REPL commands: /help /h  /tools /t  /skills /s  /reset /clear /c  /quit /exit /q
 
 import { createInterface } from "node:readline";
 import type { Writable } from "node:stream";
@@ -28,6 +28,13 @@ import type {
   Registry,
   ToolCallRecord,
 } from "./types.js";
+import {
+  discoverSkills,
+  invokeSkill,
+  skillSystemBlock,
+  skillTool,
+} from "./skills.js";
+import type { Skill } from "./skills.js";
 
 // ---------------------------------------------------------------------------
 // colors (tiny dependency-free ANSI helper)
@@ -123,6 +130,7 @@ const REPLY_HELP = [
   "REPL commands:",
   "  /help     show this help",
   "  /tools    list all tools (across every connected server)",
+  "  /skills   list local skills (./skills/)",
   "  /reset    clear the conversation history",
   "  /quit     (or /exit, /q, or Ctrl+C) leave the REPL",
   "",
@@ -160,6 +168,16 @@ export async function startChat({
   // 2) Build the (possibly multi-server) tool list.
   const openaiTools = mcpToolsToOpenai(openAiTools(registry));
 
+  // 3) Discover local skills under ./skills/ (the launch cwd). Best-effort,
+  //    like mcp.json: a missing directory simply means no skills.
+  let skills: Skill[] = [];
+  try {
+    skills = await discoverSkills(process.cwd());
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(color("red", `  ⚠ could not discover local skills: ${msg}`));
+  }
+
   // Report any servers we could not reach (they're skipped, not fatal).
   for (const w of registry.warnings) {
     console.error(
@@ -184,6 +202,9 @@ export async function startChat({
       openaiTools.length ? openaiTools.map((t) => t.function.name).join(", ") : "(none)"
     )}`
   );
+  if (skills.length > 0) {
+    console.log(`  skills : ${color("cyan", skills.map((s) => s.name).join(", "))}`);
+  }
   console.log(color("dim", "\nType a request (e.g. 'what time is it?'), or /help for commands.\n"));
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -239,6 +260,18 @@ export async function startChat({
         printTools(registry.keyedViews);
         return loop();
       }
+      if (cmd === "/skills" || cmd === "/s") {
+        process.stdout.write("\n");
+        console.log(color("green", "skills:"));
+        if (skills.length > 0) {
+          for (const s of skills) {
+            console.log(`  ${s.name} — ${s.description}`);
+          }
+        } else {
+          console.log(color("dim", "  (none found in ./skills/)"));
+        }
+        return loop();
+      }
       if (cmd === "/reset" || cmd === "/clear" || cmd === "/c") {
         process.stdout.write("\n");
         history.length = 0;
@@ -262,9 +295,20 @@ export async function startChat({
           {
             openai,
             model,
-            systemPrompt: SYSTEM_PROMPT,
-            tools: openaiTools,
-            callTool: (name, args) => callToolBy(name, registry, args),
+            systemPrompt: SYSTEM_PROMPT + skillSystemBlock(skills),
+            tools:
+              skills.length > 0 ? [...openaiTools, skillTool(skills)] : openaiTools,
+            callTool: (name, args) => {
+              // `invoke_skill` is the local-skill entry point; every other
+              // name routes to the originating MCP server.
+              if (skills.some((s) => s.name === args.name)) {
+                return invokeSkill(skills, String(args.name)).then((text) => ({
+                  isError: false,
+                  content: [{ type: "text", text }],
+                }));
+              }
+              return callToolBy(name, registry, args);
+            },
           },
           history,
           onToolCall
