@@ -1,6 +1,8 @@
 target/
 client/dist/
 client/external/
+# Local per-user MCP server config (template: client/mcp.example.json).
+client/mcp.json
 node_modules/
 .env
 
