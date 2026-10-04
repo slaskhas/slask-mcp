@@ -315,10 +315,12 @@ export async function startChat({
               // Synthetic local-skill tools; every other name routes to the
               // originating MCP server.
               if (name === "invoke_skill") {
-                return invokeSkill(skills, String(args.name)).then((text) => ({
-                  isError: false,
-                  content: [{ type: "text", text }],
-                }));
+                return invokeSkill(skills, String(args.name), args.file).then(
+                  (text) => ({
+                    isError: false,
+                    content: [{ type: "text", text }],
+                  }),
+                );
               }
               if (name === "run_skill_script") {
                 return runSkillScript(skills, args);

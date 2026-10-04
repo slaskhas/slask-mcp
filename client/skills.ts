@@ -12,10 +12,14 @@
 //
 // Only `name` + `description` (plus a list of runnable scripts) are ever in
 // context at startup; the model decides whether to use a skill by calling the
-// `invoke_skill` tool. That call re-reads the skill and returns the full body
-// plus any files bundled in the skill directory, all resolved relative to the
-// SKILL.md directory (the Claude Code skill convention — those skills drop into
-// `./skills/` unchanged).
+// `invoke_skill` tool. That call re-reads the skill and returns its full body
+// plus the *names* of any bundled reference files; to read one reference's
+// content the model passes `file` (a path relative to the skill dir). Only the
+// body is loaded up front — reference contents are pulled one at a time, when
+// the agent needs them (per the Claude skill spec: references load "when
+// explicitly needed"). All files resolve relative to the SKILL.md directory
+// (the Claude Code skill convention — those skills drop into `./skills/`
+// unchanged).
 //
 // Skills may also contain a `scripts/` folder. Those files are the only parts
 // of a skill this client can *execute* (via `run_skill_script`):
@@ -248,11 +252,18 @@ export async function loadSkill(skill: Skill): Promise<LoadedSkill> {
 }
 
 /**
- * The text returned to the model by `invoke_skill`: the skill body with bundled
- * files appended (path headers), capped to keep context lean. Throws on an
- * unknown skill name.
+ * The text returned to the model by `invoke_skill`. Without `file`: the skill
+ * body plus the *names* of the bundled reference files (not their content, so
+ * only what is needed ever enters context — per the skill spec, references are
+ * loaded "when explicitly needed"). With `file`: the content of just that one
+ * reference (path relative to the skill dir). Both are capped to keep context
+ * lean. Throws on an unknown skill name.
  */
-export async function invokeSkill(skills: Skill[], name: string): Promise<string> {
+export async function invokeSkill(
+  skills: Skill[],
+  name: string,
+  file?: unknown,
+): Promise<string> {
   const skill = skills.find((s) => s.name === name);
   if (!skill) {
     throw new Error(
@@ -262,11 +273,28 @@ export async function invokeSkill(skills: Skill[], name: string): Promise<string
     );
   }
   const { body, files } = await loadSkill(skill);
+  const available = files.map((f) => f.rel).join(", ") || "none";
+  let fileRel: string | null = null;
+  if (file !== undefined && file !== null) {
+    const candidate = String(file).trim();
+    if (candidate !== "") fileRel = candidate;
+  }
+  if (fileRel !== null) {
+    const f = files.find((f) => f.rel === fileRel);
+    if (!f) {
+      throw new Error(
+        `no reference file named "${fileRel}" in ${skill.name} ` +
+          `(available: ${available})`,
+      );
+    }
+    return f.content;
+  }
   let out = body;
   if (files.length > 0) {
     out +=
-      "\n\n" +
-      files.map((f) => `--- ${f.rel} ---\n${f.content}`).join("\n\n");
+      "\n\nBundled reference files (load one by passing `file` to invoke_skill, " +
+      "e.g. `references/notes.md`): " +
+      files.map((f) => f.rel).join(", ");
   }
   if (out.length > OUTPUT_LIMIT) {
     out =
@@ -285,8 +313,10 @@ export function skillTool(skills: Skill[]): OpenAiFunctionTool {
       description:
         "Load the full instructions of a local skill (listed in the system " +
         "prompt with its name and description). Call it before doing work a " +
-        "skill covers; the result is the skill body plus any files bundled in " +
-        "its directory.",
+        "skill covers. Without `file` it returns the skill body plus the list " +
+        "of bundled reference files; pass `file` (a relative path from that " +
+        "list) to load just that file's content, so only what you need enters " +
+        "context.",
       parameters: {
         type: "object",
         properties: {
@@ -294,6 +324,13 @@ export function skillTool(skills: Skill[]): OpenAiFunctionTool {
             type: "string",
             enum: skills.map((s) => s.name),
             description: "the skill to load",
+          },
+          file: {
+            type: "string",
+            description:
+              "optional — a relative path to one bundled reference file (e.g. " +
+              "'references/notes.md'); its content is returned instead of the " +
+              "body + list",
           },
         },
         required: ["name"],
@@ -354,8 +391,9 @@ export function skillSystemBlock(skills: Skill[]): string {
     .join("\n");
   return (
     "\n\nAvailable skills: call `invoke_skill` with a skill name to load its " +
-    "full instructions and any bundled files, or `run_skill_script` to execute " +
-    "a script from a skill's `scripts/` folder (.sh, .py, .js).\n" +
+    "instructions plus a list of bundled reference files (pass `file` to load " +
+    "one reference's content), or `run_skill_script` to execute a script from " +
+    "a skill's `scripts/` folder (.sh, .py, .js).\n" +
     lines
   );
 }

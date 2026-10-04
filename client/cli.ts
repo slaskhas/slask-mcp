@@ -41,7 +41,7 @@ import { DEFAULT_MODEL } from "./agent.js";
 import {
   discoverSkills,
   executeScript,
-  invokeSkill,
+  loadSkill,
   locateScript,
 } from "./skills.js";
 import type { CallToolResult, HttpSpec, Registry, ServerSpec } from "./types.js";
@@ -168,7 +168,11 @@ async function handleSkillCommand(config: CliConfig): Promise<void> {
         })`
       );
     }
-    console.log(await invokeSkill(skills, name));
+    const { body, files } = await loadSkill(skill);
+    console.log(body);
+    for (const f of files) {
+      console.log("\n--- " + f.rel + " ---\n" + f.content);
+    }
     return;
   }
   if (subcmd === "run") {

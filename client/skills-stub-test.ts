@@ -31,6 +31,19 @@ const textOf = (r: CallToolResult): string => {
   return first.text;
 };
 
+// runSkillScript/locateScript/invokeSkill are async — assert.throws only sees
+// *synchronous* throws, so capture rejections by awaiting them instead.
+const thrown = async (f: () => Promise<unknown>): Promise<string> => {
+  let message = "";
+  try {
+    await f();
+  } catch (e) {
+    message = e instanceof Error ? e.message : String(e);
+  }
+  assert(message !== "", "expected a throw but got none");
+  return message;
+};
+
 // ---------------------------------------------------------------------------
 // temp workspace with a couple of skills
 // ---------------------------------------------------------------------------
@@ -183,12 +196,27 @@ const alpha = skills.find((s) => s.name === "alpha")!;
   console.log("PASS test3 — loadSkill (bin.dat and big.txt skipped)");
 }
 
-// ---- 4. invokeSkill: body + bundled files; unknown name lists available ------
+// ---- 4. invokeSkill: body + reference *names* (lazy refs); `file` loads one
+// file's content; unknown name lists available --------------------------------
 {
+  // Without `file`: the model gets the body and the *names* of bundled refs —
+  // NOT their content (per spec: references load "when explicitly needed").
   const text = await invokeSkill(skills, "alpha");
   assert(text.includes("alpha confirmed"), "body missing");
-  assert(text.includes("--- references/notes.md ---"), "section header missing");
-  assert(text.includes("reference 42"), "reference content missing");
+  assert(text.includes("references/notes.md"), "ref name missing from list");
+  assert(text.includes("references/generate.py"), "ref name missing from list");
+  assert(!text.includes("reference 42"), "ref content must not be bundled");
+  // With `file`: exactly that file's content is returned.
+  const one = await invokeSkill(skills, "alpha", "references/notes.md");
+  assert(one.includes("reference 42"), "single-file content missing");
+  assert(!one.includes("alpha confirmed"), "body must not appear when file given");
+  // A bad file name throws with the available refs listed.
+  assert(
+    /no reference file named/.test(
+      await thrown(() => invokeSkill(skills, "alpha", "references/does-not-exist.md"))
+    ),
+    "bad file name not thrown"
+  );
   let msg = "";
   try {
     await invokeSkill(skills, "ghost");
@@ -196,7 +224,7 @@ const alpha = skills.find((s) => s.name === "alpha")!;
     msg = e instanceof Error ? e.message : String(e);
   }
   assert(msg.includes('no skill named "ghost"') && msg.includes("alpha, beta"), msg);
-  console.log("PASS test4 — invokeSkill");
+  console.log("PASS test4 — invokeSkill (lazy refs)");
 }
 
 // ---- 5. skillTool shape --------------------------------------------------------
@@ -205,12 +233,16 @@ const alpha = skills.find((s) => s.name === "alpha")!;
   assert(t.type === "function" && t.function.name === "invoke_skill", JSON.stringify(t));
   const params = t.function.parameters as {
     type?: string;
-    properties?: { name?: { type?: string; enum?: string[] } };
+    properties?: {
+      name?: { type?: string; enum?: string[] };
+      file?: { type?: string; description?: string },
+    };
     required?: unknown;
   };
   assert(params.type === "object", JSON.stringify(params));
   const nameProp = params.properties?.name;
   assert(nameProp?.type === "string", JSON.stringify(nameProp));
+  assert(params.properties?.file?.type === "string", JSON.stringify(params));
   assert(
     JSON.stringify(nameProp?.enum) === JSON.stringify(["alpha", "beta"]),
     `enum: ${JSON.stringify(nameProp?.enum)}`
@@ -236,7 +268,7 @@ const alpha = skills.find((s) => s.name === "alpha")!;
 }
 
 // ---- 7. runAgentTurn: the model loads a skill via invoke_skill, gets the body
-// + bundled files fed back; an unknown name recovers via error feed-back ------
+// + its reference-file list fed back; an unknown name recovers via error feed-back
 {
   const record: any[][] = [];
   const cfg = (openai: any) => ({
@@ -287,8 +319,8 @@ const alpha = skills.find((s) => s.name === "alpha")!;
     function: { name, arguments: args },
   });
 
-  // 7a — valid skill name: full body + bundled files, plus the startup block
-  // really reaching the model
+  // 7a — valid skill name: full body + reference-file list, plus the startup
+  // block really reaching the model
   const spy: any[] = [];
   const answer = await runAgentTurn(
     cfg(makeFakeModel((n: number) => {
@@ -306,7 +338,7 @@ const alpha = skills.find((s) => s.name === "alpha")!;
   assert(spy[0].name === "invoke_skill", spy[0].name);
   assert(spy[0].args.name === "alpha", JSON.stringify(spy[0].args));
   assert(spy[0].resultText.includes("alpha confirmed"), "body missing");
-  assert(spy[0].resultText.includes("reference 42"), "bundled file missing");
+  assert(spy[0].resultText.includes("references/notes.md"), "ref name missing");
   assert(answer && answer.length > 0, "no answer");
   assert(
     record[0] &&
@@ -448,19 +480,6 @@ const alpha = skills.find((s) => s.name === "alpha")!;
 
 // ---- 12. runSkillScript / locateScript throw on misuse --------------------------
 {
-  // runSkillScript/locateScript are async — assert.throws only sees *synchronous*
-  // throws, so capture rejections by awaiting them instead.
-  const thrown = async (f: () => Promise<unknown>): Promise<string> => {
-    let message = "";
-    try {
-      await f();
-    } catch (e) {
-      message = e instanceof Error ? e.message : String(e);
-    }
-    assert(message !== "", "expected a throw but got none");
-    return message;
-  };
-
   // unknown skill
   assert(
     /no skill named "ghost" /.test(

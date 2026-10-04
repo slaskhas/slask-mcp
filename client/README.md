@@ -228,12 +228,14 @@ the same convention Claude Code uses for skills, so skills copied from
 followed by the full markdown instructions (the skill's *body*). Only `name`
 and `description` are ever put in the model's context at startup (they are
 shown in the banner and under "Available skills" in the system prompt). When
-the task looks like it matches a description, the agent calls the
-`invoke_skill` tool with the skill name; only then is the full body sent to
-the model, together with any other text files bundled in the skill directory
-(loaded relative to the `SKILL.md`, e.g. `references/notes.md`). That
-laziness keeps context lean for small local models: bundled files are capped
-at 16 KiB each and the returned text at 32 KiB per call.
+the task looks like it matches a description, the agent calls the `invoke_skill`
+tool with the skill name; only then is the full body sent to the model, plus
+the *names* of the skill's other text files (relative to the `SKILL.md`, e.g.
+`references/notes.md`). The model then loads any one of those files' content on
+demand by passing its `file` argument — the same "when explicitly needed" lazy
+loading the [skill spec](https://www.skillsdirectory.com/docs/skill-file-structure)
+describes. That keeps context lean for small local models: each reference is
+capped at 16 KiB and the returned text at 32 KiB per call.
 
 A skill directory may also contain a **`scripts/`** folder; the files there
 ending in `.sh`, `.py`, or `.js` are the parts of a skill the client will
