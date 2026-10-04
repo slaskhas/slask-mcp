@@ -18,6 +18,13 @@ When writing or reviewing a commit message:
 4. Always end AI-assisted commits with the attribution line — see the bundled
    reference.
 
-The bundled file `references/conventions.md` (same directory as this
-SKILL.md) has the full conventions and worked examples — read it before
-writing a commit.
+The full conventions and worked examples live in the bundled reference
+`references/conventions.md` (same directory as this SKILL.md). Before writing
+a commit, load its content on demand with `invoke_skill` (name `example`,
+`file` `references/conventions.md`).
+
+The bundled `scripts/format.sh` clamps a commit subject line to 50 characters
+(policy #2). Use it to check a candidate subject before committing:
+
+    run_skill_script skill: `example`, script: `format.sh`, args: ["<subject>"]
+    slask-client skill run example format.sh <subject>

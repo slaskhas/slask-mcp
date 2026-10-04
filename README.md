@@ -50,8 +50,11 @@ curl -s -X POST http://127.0.0.1:9000/mcp \
 other MCP server) usable by a language model. It connects to the slask server
 over streamable HTTP and — via a JSON config file with **no fixed limit** on
 entries — to any number of additional stdio or HTTP MCP servers. It reads
-`.env` and `mcp.json` from the directory it is launched in by default, and
-discovers local skills from the `skills/` directory there (prompt-only).
+`.env` and `mcp.json` from the directory it is launched in by default, and discovers
+local skills from the `skills/` directory there: bodies are advisory prompt
+material, and an optional `scripts/` folder of `.sh`/`.py`/`.js` files the
+agent can execute (see [`client/README.md`](client/README.md) for the security
+model).
 `--config` overrides the config path. To build and use it: `npm install
 && npm run build` in the `client/` directory, then
 `npx slask-client …` from `client/` (or `node dist/cli.js …`; `npm link` for a
@@ -63,7 +66,8 @@ setup and reference. Two ways to drive it:
   works with real OpenAI or a local endpoint such as Ollama (no API key needed
   for local).
 - **Direct commands**: `list` shows every available tool (with its input schema);
-  `call <tool>` runs one by hand, with no model involved.
+  `call <tool>` runs one by hand; `skill run <skill> <script>` executes a
+  skill's bundled script — all with no model involved.
 
 Tools from every server are merged; a name shared by two servers becomes
 `<serverName>__<toolName>` on each, so the model and the caller never collide.
