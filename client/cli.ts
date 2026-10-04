@@ -7,6 +7,7 @@
 //   slask-client call <tool> …   call a tool directly and print its result
 //   slask-client skill list      list local skills (./skills/)
 //   slask-client skill show <n>  show a skill's body and bundled files
+//   slask-client skill run <n> <script> [args…]  run a skill's bundled script
 //   slask-client help
 //
 // The default slask server is configured via --url/--token (or
@@ -37,7 +38,12 @@ import {
   loadConfigServers,
 } from "./servers.js";
 import { DEFAULT_MODEL } from "./agent.js";
-import { discoverSkills, invokeSkill } from "./skills.js";
+import {
+  discoverSkills,
+  executeScript,
+  invokeSkill,
+  locateScript,
+} from "./skills.js";
 import type { CallToolResult, HttpSpec, Registry, ServerSpec } from "./types.js";
 
 const DEFAULT_URL = "http://127.0.0.1:8000/mcp";
@@ -60,6 +66,9 @@ Usage:
   slask-client skill show <name>
       Show a skill's body and its bundled files (paths relative to the
       skill's SKILL.md). No MCP connection is made.
+  slask-client skill run <skill> <script> [args…]
+      Execute a script from a skill's \`scripts/\` folder and print its output.
+      No MCP connection is made.
   slask-client help
       Show this help (also: --help).
 
@@ -86,6 +95,12 @@ Multiple servers:
       {"name":"cal","type":"http","url":"http://host:9001/mcp","token":"secret"}
   When two servers expose a tool with the same name it is namespaced as
   <serverName>__<toolName>; names unique across servers are called un-prefixed.
+
+Script execution:
+  Each skill may bundle a \`scripts/\` folder. Its .sh/.py/.js files can be run
+  by the agent (\`run_skill_script\`) and by \`skill run\` via bash/python3/node,
+  only inside that folder, with a 30 s timeout and capped output. The client
+  runs whatever scripts its skills contain (an opt-in local feature).
 
 Examples:
   slask-client                                  # interactive agent chat
@@ -123,13 +138,20 @@ async function handleSkillCommand(config: CliConfig): Promise<void> {
   const subcmd = config.positional[1];
   const name = config.positional[2];
   const skills = await discoverSkills(process.cwd());
-  if (subcmd === undefined) fail("usage: skill list | skill show <name>");
+  if (subcmd === undefined) {
+    fail(
+      "usage: skill list | skill show <name> | skill run <skill> <script> [args…]",
+    );
+  }
   if (subcmd === "list") {
     const dir = resolve(process.cwd(), "skills");
     console.log(`${skills.length} skill(s) in ${dir}:\n`);
     if (skills.length > 0) {
       for (const s of skills) {
-        console.log(`  ${s.name} — ${s.description}`);
+        const scripts = s.scripts.length
+          ? ` (scripts: ${s.scripts.join(", ")})`
+          : "";
+        console.log(`  ${s.name} — ${s.description}${scripts}`);
       }
     } else {
       console.log("  (none found)");
@@ -149,7 +171,41 @@ async function handleSkillCommand(config: CliConfig): Promise<void> {
     console.log(await invokeSkill(skills, name));
     return;
   }
-  fail(`unknown skill command: ${subcmd} (try "list" or "show <name>")`);
+  if (subcmd === "run") {
+    const skillName = config.positional[2];
+    const scriptName = config.positional[3];
+    if (skillName === undefined || scriptName === undefined) {
+      fail("usage: skill run <skill> <script> [args…]");
+    }
+    const found = skills.find((s) => s.name === skillName);
+    if (!found) {
+      fail(
+        `no skill named "${skillName}" (available: ${
+          skills.length ? skills.map((s) => s.name).join(", ") : "none"
+        })`,
+      );
+    }
+    try {
+      const scriptPath = await locateScript(found, scriptName);
+      const result = await executeScript(
+        scriptPath,
+        config.positional.slice(4),
+        process.cwd(),
+        { ...process.env, SLASK_SKILL_DIR: found.dir },
+      );
+      process.stdout.write(result.stdout);
+      if (result.stderr.trim() !== "") process.stderr.write(result.stderr);
+      if (result.timedOut) process.stderr.write("\n(run timed out)\n");
+      process.exitCode = result.exitCode;
+      return;
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+  }
+  fail(
+    `unknown skill command: ${subcmd} (try "list", "show <name>", or ` +
+      `"run <skill> <script>")`,
+  );
 }
 
 // Hand-rolled flag/positional parsing (no dependencies).

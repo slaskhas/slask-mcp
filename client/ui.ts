@@ -31,6 +31,8 @@ import type {
 import {
   discoverSkills,
   invokeSkill,
+  runSkillScript,
+  runScriptTool,
   skillSystemBlock,
   skillTool,
 } from "./skills.js";
@@ -203,7 +205,16 @@ export async function startChat({
     )}`
   );
   if (skills.length > 0) {
-    console.log(`  skills : ${color("cyan", skills.map((s) => s.name).join(", "))}`);
+    console.log(
+      `  skills : ${color(
+        "cyan",
+        skills
+          .map((s) =>
+            s.scripts.length ? `${s.name} [${s.scripts.join(", ")}]` : s.name
+          )
+          .join(", ")
+      )}`
+    );
   }
   console.log(color("dim", "\nType a request (e.g. 'what time is it?'), or /help for commands.\n"));
 
@@ -297,15 +308,20 @@ export async function startChat({
             model,
             systemPrompt: SYSTEM_PROMPT + skillSystemBlock(skills),
             tools:
-              skills.length > 0 ? [...openaiTools, skillTool(skills)] : openaiTools,
+              skills.length > 0
+                ? [...openaiTools, skillTool(skills), runScriptTool(skills)]
+                : openaiTools,
             callTool: (name, args) => {
-              // `invoke_skill` is the local-skill entry point; every other
-              // name routes to the originating MCP server.
-              if (skills.some((s) => s.name === args.name)) {
+              // Synthetic local-skill tools; every other name routes to the
+              // originating MCP server.
+              if (name === "invoke_skill") {
                 return invokeSkill(skills, String(args.name)).then((text) => ({
                   isError: false,
                   content: [{ type: "text", text }],
                 }));
+              }
+              if (name === "run_skill_script") {
+                return runSkillScript(skills, args);
               }
               return callToolBy(name, registry, args);
             },

@@ -21,3 +21,9 @@ When writing or reviewing a commit message:
 The bundled file `references/conventions.md` (same directory as this
 SKILL.md) has the full conventions and worked examples — read it before
 writing a commit.
+
+The bundled `scripts/format.sh` clamps a commit subject line to 50 characters
+(policy #2). Use it to check a candidate subject before committing:
+
+    run_skill_script skill: `example`, script: `format.sh`, args: ["<subject>"]
+    slask-client skill run example format.sh <subject>

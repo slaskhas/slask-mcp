@@ -235,18 +235,42 @@ the model, together with any other text files bundled in the skill directory
 laziness keeps context lean for small local models: bundled files are capped
 at 16 KiB each and the returned text at 32 KiB per call.
 
-Skills are **advisory prompt material only**: the client never executes any
-script or command a skill references — no execution surface is added. A
-missing `./skills/` (or an empty one) is a silent no-op; `disabled: true`
-skills, duplicate names (first directory alphabetically wins), flat files, and
-directories without a `SKILL.md` are all skipped.
+A skill directory may also contain a **`scripts/`** folder; the files there
+ending in `.sh`, `.py`, or `.js` are the parts of a skill the client will
+*execute* — by the agent via the `run_skill_script` tool, or directly via
+`slask-client skill run` — and no other script or command in a skill is ever
+run. Guardrails:
 
-Inspect skills without a model or an MCP connection:
+- **Path:** only files under `<skill dir>/scripts/`; anything that would
+  traverse out of that folder is refused.
+- **Extension:** only `.sh` (run via `bash`), `.py` (`python3`), and `.js`
+  (`node`); other extensions are not scripts.
+- **No shell injection:** scripts are spawned with an explicit argv array —
+  no `shell: true`, no string interpolation — so arguments are individual
+  argv elements, not shell input.
+- **Limits:** a 30 s hard timeout (the child is killed) and output capped at
+  the same 32 KiB the agent sees.
+- **Environment/cwd:** the script inherits the client's environment plus
+  `SLASK_SKILL_DIR` (set to the skill's directory, so a script can read sibling
+  `references/` or `templates/`) and runs with the launch directory as its
+  `cwd`.
 
-    slask-client skill list          # name + description of each skill
-    slask-client skill show example  # body + bundled files
+The client runs whatever scripts its skills contain — that execution is the
+user's responsibility (an opt-in, local-development feature operating on
+user-authored skill directories; nothing is executed for skills the client
+doesn't have). A missing `./skills/` (or an empty one) is a silent no-op;
+`disabled: true` skills, duplicate names (first directory alphabetically wins),
+flat files, and directories without a `SKILL.md` are all skipped.
 
-The chat REPL has a `/skills` command that lists the same information.
+Inspect or run skills without a model or an MCP connection:
+
+    slask-client skill list                  # name + description, plus any bundled scripts
+    slask-client skill show example          # body + bundled files
+    slask-client skill run example format.sh <subject>
+
+The chat REPL has a `/skills` command that lists the same information; a skill's
+bundled scripts are also shown in the startup banner and via the agent's
+`run_skill_script` tool.
 
 ## Options & environment
 
