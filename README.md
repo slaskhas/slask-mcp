@@ -46,32 +46,16 @@ curl -s -X POST http://127.0.0.1:9000/mcp \
 
 ## Client
 
-`slask-client` is a **TypeScript** Node.js CLI that makes this server (and any
-other MCP server) usable by a language model. It connects to the slask server
-over streamable HTTP and — via a JSON config file with **no fixed limit** on
-entries — to any number of additional stdio or HTTP MCP servers. It reads
-`.env` and `mcp.json` from the directory it is launched in by default, and discovers
-local skills from the `skills/` directory there: bodies are advisory prompt
-material, and an optional `scripts/` folder of `.sh`/`.py`/`.js` files the
-agent can execute (see [`client/README.md`](client/README.md) for the security
-model).
-`--config` overrides the config path. To build and use it: `npm install
-&& npm run build` in the `client/` directory, then
-`npx slask-client …` from `client/` (or `node dist/cli.js …`; `npm link` for a
-global binary). See [`client/README.md`](client/README.md) for the full
-setup and reference. Two ways to drive it:
+`slask-client` is a **TypeScript** Node.js CLI that lets a language model use this server (and any other MCP server). It reads `.env` and `mcp.json` from the directory it is launched in (`--config` overrides the path).
 
-- **Agent chat** (`slask-client` with no args): a line-based REPL where an OpenAI-
-  compatible model picks tools via function-calling, runs them, and answers. It
-  works with real OpenAI or a local endpoint such as Ollama (no API key needed
-  for local).
-- **Direct commands**: `list` shows every available tool (with its input schema);
-  `call <tool>` runs one by hand; `skill run <skill> <script>` executes a
-  skill's bundled script — all with no model involved.
+What it supports:
+- **Multiple MCP servers** — the default slask server plus any number of additional stdio or HTTP servers listed in the config file.
+- **Agent chat** — a line-based REPL where an OpenAI-compatible model (real or local, e.g. Ollama) picks tools via function-calling and answers.
+- **Local skills** — discovered from `./skills/`: advisory prompt material in `SKILL.md`, plus an optional executable `scripts/` folder (`.sh`/`.py`/`.js`).
+- **Direct commands** — `list` (every tool with its input schema), `call <tool>`, and `skill run <skill> <script>`, all without a model.
+- **Name collision** — a tool shared by two servers is namespaced as `<serverName>__<toolName>`.
 
-Tools from every server are merged; a name shared by two servers becomes
-`<serverName>__<toolName>` on each, so the model and the caller never collide.
-See [`client/README.md`](client/README.md) for the full reference.
+To build and use it: `npm install && npm run build` in `client/`, then `npx slask-client` (or `node dist/cli.js`). See [`client/README.md`](client/README.md) for the full setup and reference, including the script-execution security model.
 
 ## Configuration
 
