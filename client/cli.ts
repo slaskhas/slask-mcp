@@ -3,6 +3,7 @@
 //
 //   slask-client                 interactive chat (OpenAI agent + MCP tools)
 //   slask-client chat            same
+//   slask-client --prompt <text> run one agent turn, print the answer, and exit
 //   slask-client list            list all tools (across every connected server)
 //   slask-client call <tool> …   call a tool directly and print its result
 //   slask-client skill list      list local skills (./skills/)
@@ -27,7 +28,8 @@
 //                               placeholder key
 
 import { resolve } from "node:path";
-import { startChat } from "./ui.js";
+import { pathToFileURL } from "node:url";
+import { runOneShot, startChat } from "./ui.js";
 import { hintFor, printTools, textFrom } from "./client.js";
 import { loadEnvFile } from "./env.js";
 import {
@@ -53,6 +55,8 @@ const HELP = `slask-client — a CLI for MCP servers (streamable HTTP + stdio)
 Usage:
   slask-client                 Run the interactive agent chat (default).
   slask-client chat            Same as the default.
+  slask-client --prompt <text> Run one agent turn with <text>, print the
+                               answer, and exit (no REPL).
   slask-client list
       List all tools (across every connected server) with their input schemas.
   slask-client call <tool> [options]
@@ -78,6 +82,8 @@ Options:
   -c, --config <path>    MCP servers config file (JSON; default: mcp.json in the current dir)
       --no-default       Do not include the default slask server
   -m, --model <model>    OpenAI model (chat mode; default: gpt-4o-mini)
+  -p, --prompt <text>    Run one agent turn with this prompt, print the answer,
+                         and exit (instead of the interactive REPL).
   -b, --base-url <url>   OpenAI-compatible base URL (chat; overrides API_BASE)
   Env vars (a .env file in the current dir is read on startup; shell values
              win): SLASK_MCP_URL, SLASK_MCP_TOKEN (default server);
@@ -107,6 +113,7 @@ Examples:
   SLASK_MCP_URL=http://127.0.0.1:9000/mcp OPENAI_API_KEY=sk-… slask-client
   SLASK_MCP_URL=http://127.0.0.1:9000/mcp API_BASE=http://192.168.68.73:11434 \\
       MODEL=gemma4:12b-mlx slask-client         # local model, no API key needed
+  slask-client --prompt "what time is it now?"
   slask-client list
   slask-client call echo --message "hi"
   slask-client call current_time_utc
@@ -126,6 +133,7 @@ interface CliConfig {
   base: string | null;
   positional: string[];
   args: Record<string, unknown>;
+  prompt: string | null;
   help: boolean;
 }
 
@@ -213,7 +221,10 @@ async function handleSkillCommand(config: CliConfig): Promise<void> {
 }
 
 // Hand-rolled flag/positional parsing (no dependencies).
-function parse(argv: string[]): CliConfig {
+//
+// Exported so tests can drive it in-process; the module entrypoint below is
+// guarded so *importing* cli.js (tests) does not run the CLI.
+export function parse(argv: string[]): CliConfig {
   const config: CliConfig = {
     url: process.env.SLASK_MCP_URL ?? DEFAULT_URL,
     token: process.env.SLASK_MCP_TOKEN ?? null,
@@ -223,6 +234,7 @@ function parse(argv: string[]): CliConfig {
     base: null,
     positional: [],
     args: {},
+    prompt: null,
     help: false,
   };
 
@@ -260,6 +272,8 @@ function parse(argv: string[]): CliConfig {
       if (++i < argv.length) config.args.message = argv[i];
     } else if (f === "--query") {
       if (++i < argv.length) config.args.query = argv[i];
+    } else if (f === "--prompt" || f === "-p") {
+      if (++i < argv.length) config.prompt = argv[i];
     } else {
       config.positional.push(f);
     }
@@ -352,7 +366,17 @@ async function main(): Promise<void> {
 
   if (!sub || sub === "chat") {
     const model = config.model ?? process.env.MODEL ?? process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
-    await startChat({ registry, model, base: config.base });
+    if (config.prompt) {
+      const code = await runOneShot({
+        registry,
+        model,
+        base: config.base,
+        prompt: config.prompt,
+      });
+      process.exit(code);
+    } else {
+      await startChat({ registry, model, base: config.base });
+    }
     return;
   }
 
@@ -387,4 +411,12 @@ async function main(): Promise<void> {
   await closeAll(registry);
 }
 
-main();
+// cli.js is the entrypoint only when executed directly — i.e. its path matches
+// process.argv[1]. Importing cli.js (tests pulling out `parse`) must NOT run
+// the CLI, otherwise it would connect to servers and exit the process.
+if (
+  process.argv[1] !== undefined &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
+  void main();
+}

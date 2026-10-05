@@ -192,6 +192,20 @@ slask-agent >
 | /reset | clear the conversation history                |
 | /quit  | exit the REPL (or /exit, /q, Ctrl+C)          |
 
+### One-shot prompts
+
+To run a single prompt without the REPL, pass `--prompt` (or `-p`). The client
+connects, runs one agent turn with your prompt, prints the answer (with the same
+tool trace), and exits:
+
+```bash
+SLASK_MCP_URL=http://127.0.0.1:9000/mcp API_BASE=http://192.168.68.73:11434 \
+  MODEL=gemma4:12b-mlx slask-client --prompt "use news-feeds to pull news from BBC"
+```
+
+This is the deterministic way to run one turn for scripting, cron, or CI —
+`echo "…" | slask-client` is not reliable, because a closed stdin makes the
+REPL shut down before the model answers.
 
 ## Direct, non-LLM commands
 
@@ -283,6 +297,7 @@ bundled scripts are also shown in the startup banner and via the agent's
 | -m, --model <name>| -m  | MODEL          | openai model (chat; default: gpt-4o-mini)                                                                   |
 | --base-url <url>  |     | API_BASE       | openai base url (chat; default: https://api.openai.com)                                                     |
 | -c, --config <path>| -c  | SLASK_MCP_CONFIG| extra servers (JSON); default: mcp.json in the current dir; missing explicit file is an error; missing default = no extra servers |
+| -p, --prompt <text>| -p  | (none)         | run one agent turn with the prompt, print the answer, and exit (instead of the REPL) |
 | OPENAI_API_KEY    |     | OPENAI_API_KEY | openai api key; only needed for the real openai endpoint (see API_BASE note)                                |
 |                   |     | OPENAI_MODEL   | legacy model name (checked after MODEL)                                                                     |
 
