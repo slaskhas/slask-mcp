@@ -50,7 +50,7 @@ curl -s -X POST http://127.0.0.1:9000/mcp \
 
 What it supports:
 - **Multiple MCP servers** — the default slask server plus any number of additional stdio or HTTP servers listed in the config file.
-- **Agent chat** — a line-based REPL where an OpenAI-compatible model (real or local, e.g. Ollama) picks tools via function-calling and answers.
+- **Agent chat** — a line-based REPL where an OpenAI-compatible model (real or local, e.g. Ollama) picks tools via function-calling and answers; `--prompt "<text>"` runs a single turn and exits, without the REPL.
 - **Local skills** — discovered from `./skills/`: advisory prompt material in `SKILL.md`, plus an optional executable `scripts/` folder (`.sh`/`.py`/`.js`).
 - **Direct commands** — `list` (every tool with its input schema), `call <tool>`, and `skill run <skill> <script>`, all without a model.
 - **Name collision** — a tool shared by two servers is namespaced as `<serverName>__<toolName>`.

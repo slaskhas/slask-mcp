@@ -5,7 +5,8 @@
 // model decides which MCP tools to call, the client executes them, results feed
 // back, and a final answer is printed. Non-streaming, with a small `thinking…`
 // spinner and a dependency-free color/ANSI helper. Built on node:readline only
-// (no TUI lib).
+// (no TUI lib). `runOneShot` runs a single agent turn for a prompt and exits,
+// used by the `--prompt` flag.
 //
 // REPL commands: /help /h  /tools /t  /skills /s  /reset /clear /c  /quit /exit /q
 
@@ -24,7 +25,9 @@ import {
   runAgentTurn,
 } from "./agent.js";
 import type {
+  CallToolResult,
   ConversationMessage,
+  OpenAiFunctionTool,
   Registry,
   ToolCallRecord,
 } from "./types.js";
@@ -58,7 +61,7 @@ const color = (name: keyof typeof PALETTE, s: string) =>
 const PROMPT = color("cyan", "slask-agent > ");
 
 // ---------------------------------------------------------------------------
-// spinner
+// spinner (exported so tests can drive `runTurn` against a captured stream)
 // ---------------------------------------------------------------------------
 const FRAMES = [
   "▋",
@@ -73,7 +76,7 @@ const FRAMES = [
   "●",
 ] as const;
 
-class Spinner {
+export class Spinner {
   out: Writable;
   timer: ReturnType<typeof setInterval> | null;
   label: string;
@@ -143,35 +146,44 @@ const REPLY_HELP = [
 ].join("\n");
 
 // ---------------------------------------------------------------------------
-// the REPL
+// shared chat setup (used by the REPL and by one-shot runs)
 // ---------------------------------------------------------------------------
-// The caller (cli.ts) has already connected the servers (best-effort) and
-// handed us a registry: { views, warnings, keyedViews, byKey }.
-export async function startChat({
-  registry,
-  model,
-  base,
-}: {
+export interface ChatState {
+  openai: InstanceType<typeof OpenAI>;
+  openaiTools: OpenAiFunctionTool[];
+  skills: Skill[];
+  registry: Registry;
+  model: string;
+  base: string | null;
+}
+
+// Open the OpenAI client, build the MCP tool list, and discover local skills
+// (best-effort, like the mcp.json servers). Prints any unreachable-server
+// warnings so the REPL and one-shot runs report them identically.
+// An `openai` client can be injected (optional seam) so callers that don't
+// need a real model (tests) can skip the real `OpenAI` constructor.
+async function buildChatState(options: {
   registry: Registry;
   model: string;
   base?: string | null;
-}): Promise<void> {
-  // 1) OpenAI client (chat-only) — fail fast, before touching the server.
-  //    `base` (a `--base-url` flag) takes precedence over API_BASE, which
-  //    defaults to the real OpenAI endpoint. Local servers (e.g. Ollama)
-  //    accept a placeholder key, so no real key is required for them.
+  openai?: InstanceType<typeof OpenAI>;
+}): Promise<ChatState> {
+  const { registry, model } = options;
+  const base = options.base ?? null;
+
   let openai: InstanceType<typeof OpenAI>;
-  try {
-    openai = createOpenAiClient({ base });
-  } catch (e) {
-    die(e instanceof Error ? e.message : String(e));
+  if (options.openai !== undefined) {
+    openai = options.openai;
+  } else {
+    try {
+      openai = createOpenAiClient({ base });
+    } catch (e) {
+      die(e instanceof Error ? e.message : String(e));
+    }
   }
 
-  // 2) Build the (possibly multi-server) tool list.
   const openaiTools = mcpToolsToOpenai(openAiTools(registry));
 
-  // 3) Discover local skills under ./skills/ (the launch cwd). Best-effort,
-  //    like mcp.json: a missing directory simply means no skills.
   let skills: Skill[] = [];
   try {
     skills = await discoverSkills(process.cwd());
@@ -180,48 +192,139 @@ export async function startChat({
     console.error(color("red", `  ⚠ could not discover local skills: ${msg}`));
   }
 
-  // Report any servers we could not reach (they're skipped, not fatal).
   for (const w of registry.warnings) {
     console.error(
       color("red", `  ⚠ could not reach server ${w.name}: ${w.error}${hintFor(w.error)}`)
     );
   }
 
-  // Banner.
-  const effectiveBase = base ?? process.env.API_BASE ?? DEFAULT_API_BASE;
+  return { openai, openaiTools, skills, registry, model, base };
+}
+
+// Print the startup banner. `interactive` controls the trailing "type a
+// request" hint (shown only in the REPL).
+export function printBanner(state: ChatState, interactive: boolean): void {
+  const effectiveBase = state.base ?? process.env.API_BASE ?? DEFAULT_API_BASE;
   console.log(color("bold", "\nslask-mcp agent\n"));
-  for (const v of registry.keyedViews) {
+  for (const v of state.registry.keyedViews) {
     console.log(`  server : ${color("cyan", v.name)} (${v.kind}) ${v.address}`);
   }
-  if (registry.keyedViews.length === 0) {
+  if (state.registry.keyedViews.length === 0) {
     console.log(`  server : ${color("dim", "(none reached)")}`);
   }
-  console.log(`  model  : ${color("cyan", model)}`);
+  console.log(`  model  : ${color("cyan", state.model)}`);
   console.log(`  api    : ${color("cyan", effectiveBase)}`);
   console.log(
     `  tools  : ${color(
       "cyan",
-      openaiTools.length ? openaiTools.map((t) => t.function.name).join(", ") : "(none)"
+      state.openaiTools.length
+        ? state.openaiTools.map((t) => t.function.name).join(", ")
+        : "(none)"
     )}`
   );
-  if (skills.length > 0) {
+  if (state.skills.length > 0) {
     console.log(
       `  skills : ${color(
         "cyan",
-        skills
+        state.skills
           .map((s) =>
-            s.scripts.length ? `${s.name} [${s.scripts.join(", ")}]` : s.name
+            s.scripts.length
+              ? `${s.name} [${s.scripts.join(", ")}]`
+              : s.name
           )
           .join(", ")
       )}`
     );
   }
-  console.log(color("dim", "\nType a request (e.g. 'what time is it?'), or /help for commands.\n"));
+  if (interactive) {
+    console.log(
+      color("dim", "\nType a request (e.g. 'what time is it?'), or /help for commands.\n")
+    );
+  }
+}
 
+// Run a single user turn: push the prompt, drive the agent loop (with tool
+// trace), and return the final answer. Returns null on failure (the error is
+// already printed) so the caller can re-prompt or exit.
+export async function runTurn(
+  state: ChatState,
+  prompt: string,
+  history: ConversationMessage[],
+  spinner: Spinner,
+): Promise<string | null> {
+  const { openai, openaiTools, skills, model } = state;
+  const systemPrompt = SYSTEM_PROMPT + skillSystemBlock(skills);
+  const tools =
+    skills.length > 0
+      ? [...openaiTools, skillTool(skills), runScriptTool(skills)]
+      : openaiTools;
+  const callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResult> =
+    (name, args) => {
+    // Synthetic local-skill tools; every other name routes to the originating MCP server.
+    if (name === "invoke_skill") {
+      return invokeSkill(skills, String(args.name), args.file).then(
+        (text) => ({ isError: false, content: [{ type: "text", text }] }),
+      );
+    }
+    if (name === "run_skill_script") {
+      return runSkillScript(skills, args);
+    }
+    return callToolBy(name, state.registry, args);
+  };
+
+  const onToolCall = (rec: ToolCallRecord) => {
+    spinner.stopDown();
+    console.log(color("yellow", `  ▸ ${rec.name}(${JSON.stringify(rec.args)})`));
+    console.log(color("dim", `      ${rec.resultText.replace(/\n/g, "\n      ")}`));
+    spinner.start("thinking…");
+  };
+
+  const userMsg: ConversationMessage = { role: "user", content: prompt };
+  spinner.start("thinking…");
+  history.push(userMsg);
+  try {
+    const answer = await runAgentTurn(
+      { openai, model, systemPrompt, tools, callTool },
+      history,
+      onToolCall
+    );
+    spinner.stopDown();
+    history.push({ role: "assistant", content: answer });
+    return answer;
+  } catch (err) {
+    spinner.stop();
+    // Drop the unprocessed request so a failed turn doesn't pollute history.
+    if (history[history.length - 1] === userMsg) history.pop();
+    console.log(
+      color("red", `${err instanceof Error ? err.message : String(err)}\n`)
+    );
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// the REPL
+// ---------------------------------------------------------------------------
+// The caller (cli.ts) has already connected the servers (best-effort) and
+// handed us a registry: { views, warnings, keyedViews, byKey }.
+export async function startChat({
+  registry,
+  model,
+  base,
+  openai,
+}: {
+  registry: Registry;
+  model: string;
+  base?: string | null;
+  openai?: InstanceType<typeof OpenAI>;
+}): Promise<void> {
+  const state = await buildChatState({ registry, model, base, openai });
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const spinner = new Spinner();
   const history: ConversationMessage[] = [];
   let exited = false;
+
+  printBanner(state, true);
 
   const shutdown = () => {
     if (exited) return;
@@ -234,21 +337,13 @@ export async function startChat({
     }
     (async () => {
       try {
-        await closeAll(registry);
+        await closeAll(state.registry);
       } catch {
         /* servers may already be gone */
       }
       rl.close();
       process.exit(0);
     })();
-  };
-
-  // Print a tool trace (called by the agent loop while the spinner is up).
-  const onToolCall = ({ name, args, resultText }: ToolCallRecord) => {
-    spinner.stopDown();
-    console.log(color("yellow", `  ▸ ${name}(${JSON.stringify(args)})`));
-    console.log(color("dim", `      ${resultText.replace(/\n/g, "\n      ")}`));
-    spinner.start("thinking…");
   };
 
   // Re-prompt after a turn completes.
@@ -268,14 +363,14 @@ export async function startChat({
       }
       if (cmd === "/tools" || cmd === "/t") {
         process.stdout.write("\n");
-        printTools(registry.keyedViews);
+        printTools(state.registry.keyedViews);
         return loop();
       }
       if (cmd === "/skills" || cmd === "/s") {
         process.stdout.write("\n");
         console.log(color("green", "skills:"));
-        if (skills.length > 0) {
-          for (const s of skills) {
+        if (state.skills.length > 0) {
+          for (const s of state.skills) {
             console.log(`  ${s.name} — ${s.description}`);
           }
         } else {
@@ -293,56 +388,12 @@ export async function startChat({
         return shutdown();
       }
 
-      // A chat turn: spinner up for the whole round (LLM + any tool calls).
-      //
-      // The user message is pushed to the history *before* the model is asked,
-      // so it responds to the current line — not the previous turn's.
-      const userMsg: ConversationMessage = { role: "user", content: input };
-      spinner.start("thinking…");
-      let answer: string;
-      try {
-        history.push(userMsg);
-        answer = await runAgentTurn(
-          {
-            openai,
-            model,
-            systemPrompt: SYSTEM_PROMPT + skillSystemBlock(skills),
-            tools:
-              skills.length > 0
-                ? [...openaiTools, skillTool(skills), runScriptTool(skills)]
-                : openaiTools,
-            callTool: (name, args) => {
-              // Synthetic local-skill tools; every other name routes to the
-              // originating MCP server.
-              if (name === "invoke_skill") {
-                return invokeSkill(skills, String(args.name), args.file).then(
-                  (text) => ({
-                    isError: false,
-                    content: [{ type: "text", text }],
-                  }),
-                );
-              }
-              if (name === "run_skill_script") {
-                return runSkillScript(skills, args);
-              }
-              return callToolBy(name, registry, args);
-            },
-          },
-          history,
-          onToolCall
-        );
-      } catch (err) {
-        spinner.stop();
-        // Drop the unprocessed request so a failed turn doesn't pollute history.
-        if (history[history.length - 1] === userMsg) history.pop();
-        console.log(
-          color("red", `${err instanceof Error ? err.message : String(err)}\n`)
-        );
-        return loop(); // stay alive; re-prompt
-      }
-      spinner.stopDown();
+      // A chat turn: the model picks tools (MCP or local skills) and the agent
+      // loop drives the round to completion.
+      const answer = await runTurn(state, input, history, spinner);
+      if (answer === null) return loop(); // error already printed; re-prompt
+
       console.log(color("blue", `  ${answer ? answer : "(no response)"}`));
-      history.push({ role: "assistant", content: answer });
       console.log(); // blank line between turns
       loop();
     });
@@ -353,4 +404,37 @@ export async function startChat({
   process.stdin.on("end", shutdown);
 
   loop();
+}
+
+// Run a single agent turn for a prompt. The scripted, non-REPL mode selected
+// by `slask-client --prompt <text>`. Returns the process exit code: 0 on a
+// successful answer, 1 when the turn fails (the error is already printed).
+// The caller (cli.js) performs the actual exit so the function is testable
+// in-process.
+export async function runOneShot({
+  registry,
+  model,
+  base,
+  prompt,
+  openai,
+}: {
+  registry: Registry;
+  model: string;
+  base?: string | null;
+  prompt: string;
+  openai?: InstanceType<typeof OpenAI>;
+}): Promise<number> {
+  const state = await buildChatState({ registry, model, base, openai });
+  printBanner(state, false);
+  console.log(color("dim", "\nprompt: "));
+  console.log(color("dim", `  ${prompt}\n`));
+  const spinner = new Spinner();
+  const history: ConversationMessage[] = [];
+  const answer = await runTurn(state, prompt, history, spinner);
+  await closeAll(state.registry);
+  if (answer === null) {
+    return 1;
+  }
+  console.log(color("blue", `  ${answer ? answer : "(no response)"}`));
+  return 0;
 }
