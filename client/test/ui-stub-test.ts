@@ -13,16 +13,18 @@
 //     (null, unprocessed user message popped from history).
 //   * runOneShot — exit code 0 + answer printed on success; 1 + error on failure.
 //   * printBanner — the "Type a request" hint only in interactive mode.
+//   * file tools — a scripted model drives write_file → read_file → edit_file
+//     and the resulting on-disk content is asserted (test 6).
 
 import assert from "node:assert/strict";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Spinner, printBanner, runOneShot, runTurn } from "./ui.js";
-import type { ChatState } from "./ui.js";
-import { mcpToolsToOpenai } from "./agent.js";
-import { openAiTools } from "./servers.js";
+import { Spinner, printBanner, runOneShot, runTurn } from "../ui.js";
+import type { ChatState } from "../ui.js";
+import { mcpToolsToOpenai } from "../agent.js";
+import { openAiTools } from "../servers.js";
 import type { OpenAI } from "openai";
 import type {
   CallToolResult,
@@ -31,7 +33,7 @@ import type {
   Registry,
   ServerView,
   Tool,
-} from "./types.js";
+} from "../types.js";
 
 // The fake model is not structurally an OpenAI instance (it lacks apiKey,
 // baseURL, …), so it must be cast. `unknown` casts cleanly to the concrete type.
@@ -137,6 +139,7 @@ function makeState(
     registry,
     model: "test-model",
     base: null,
+    baseDir: workDir,
   };
 }
 
@@ -299,6 +302,7 @@ try {
       registry,
       model: "test-model",
       base: null,
+      baseDir: workDir,
     };
 
     const a = captureStdout();
@@ -321,6 +325,82 @@ try {
       `interactive should include 'Type a request': ${JSON.stringify(interactive)}`
     );
     console.log("PASS test5 — printBanner (interactive flag)");
+  }
+
+  // ---- Test 6: file tools — write_file → read_file → edit_file, then assert
+  // the resulting on-disk content in workDir ----------------------------------
+  {
+    const { registry, calls } = makeRegistry([mkTool("echo")]);
+    const out = captureStdout();
+    const state = makeState(
+      [mkTool("echo")],
+      registry,
+      makeFakeModel((n) => {
+        if (n === 1)
+          return choice(
+            {
+              tool_calls: [
+                toolCall(
+                  "f1",
+                  "write_file",
+                  JSON.stringify({ path: "hello.txt", content: "hi" })
+                ),
+              ],
+            },
+            "tool_calls"
+          );
+        if (n === 2)
+          return choice(
+            {
+              tool_calls: [
+                toolCall("f2", "read_file", JSON.stringify({ path: "hello.txt" })),
+              ],
+            },
+            "tool_calls"
+          );
+        if (n === 3)
+          return choice(
+            {
+              tool_calls: [
+                toolCall(
+                  "f3",
+                  "edit_file",
+                  JSON.stringify({
+                    path: "hello.txt",
+                    search: "hi",
+                    replace: "hello, world",
+                  })
+                ),
+              ],
+            },
+            "tool_calls"
+          );
+        if (n === 4) return choice({ content: "Done." }, "stop");
+        throw new Error(`unexpected round ${n}`);
+      })
+    );
+    const spinner = new Spinner();
+    const history: ConversationMessage[] = [];
+    const answer = await runTurn(state, "create hello.txt containing hi, read it, then edit it to hello, world", history, spinner);
+    const stdout = out.text();
+    out.stop();
+    assert(answer === "Done.", `answer: ${JSON.stringify(answer)}`);
+    assert(history.length === 2, `history length: ${history.length}`);
+    // The file on disk must be the *edited* content — proving the full
+    // write → read → edit round-trip hit the real filesystem in workDir.
+    assert(
+      (await readFile(join(workDir, "hello.txt"), "utf8")) === "hello, world",
+      "on-disk content wrong: " +
+        JSON.stringify((await readFile(join(workDir, "hello.txt"), "utf8")))
+    );
+    // The tool trace must show all three file tools, in order, and the MCP
+    // echo tool must not have been touched (file routing is bypassing MCP).
+    const idxW = stdout.indexOf("write_file");
+    const idxR = stdout.indexOf("read_file");
+    const idxE = stdout.indexOf("edit_file");
+    assert(idxW >= 0 && idxR > idxW && idxE > idxR, `tool order: ${JSON.stringify(stdout)}`);
+    assert(calls.length === 0, `MCP echo calls expected 0, got ${calls.length}`);
+    console.log("PASS test6 — file tools: write→read→edit round-trip on disk");
   }
 
   console.log("\nALL UI STUB TESTS PASSED");

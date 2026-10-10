@@ -6,7 +6,7 @@
 // call `process.exit(1)` and so are not exercised in-process (documented
 // behavior).
 import assert from "node:assert/strict";
-import { parse } from "./cli.js";
+import { parse } from "../cli.js";
 
 const DEFAULT_URL = "http://127.0.0.1:8000/mcp";
 

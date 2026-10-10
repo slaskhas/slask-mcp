@@ -11,7 +11,7 @@ import {
   loadConfigServers,
   openAiTools,
   resolveTool,
-} from "./servers.js";
+} from "../servers.js";
 import type {
   CallToolResult,
   Client,
@@ -21,7 +21,7 @@ import type {
   ServerSpec,
   StdioSpec,
   Tool,
-} from "./types.js";
+} from "../types.js";
 
 // Capture a thrown value from a sync or async callable (assert.throws only
 // sees synchronous throws, so this also catches Promise rejections).

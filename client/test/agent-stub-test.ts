@@ -2,17 +2,17 @@
 // server, so we verify the tool-calling loop (call → execute → feed-back →
 // final answer) and that the $schema keys are stripped, without a real API key.
 import assert from "node:assert/strict";
-import { runAgentTurn, mcpToolsToOpenai, SYSTEM_PROMPT } from "./agent.js";
-import { connect, listTools, close, callTool, textFrom } from "./client.js";
+import { runAgentTurn, mcpToolsToOpenai, SYSTEM_PROMPT } from "../agent.js";
+import { connect, listTools, close, callTool, textFrom } from "../client.js";
 import {
   buildSpecs,
   callToolBy,
   closeAll,
   connectAllServers,
   openAiTools,
-} from "./servers.js";
+} from "../servers.js";
 import type { CallToolResult, Client, Tool } from "@modelcontextprotocol/client";
-import type { OpenAiFunctionTool } from "./types.js";
+import type { OpenAiFunctionTool } from "../types.js";
 
 const url = process.env.MCP_URL ?? "http://127.0.0.1:9000/mcp";
 const token = process.env.SLASK_MCP_TOKEN ?? null;

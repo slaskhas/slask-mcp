@@ -40,6 +40,12 @@ import {
   skillTool,
 } from "./skills.js";
 import type { Skill } from "./skills.js";
+import {
+  FILE_TOOL_NAMES,
+  callFileTool,
+  fileSystemBlock,
+  fileTools,
+} from "./files.js";
 
 // ---------------------------------------------------------------------------
 // colors (tiny dependency-free ANSI helper)
@@ -155,6 +161,7 @@ export interface ChatState {
   registry: Registry;
   model: string;
   base: string | null;
+  baseDir: string;
 }
 
 // Open the OpenAI client, build the MCP tool list, and discover local skills
@@ -198,7 +205,15 @@ async function buildChatState(options: {
     );
   }
 
-  return { openai, openaiTools, skills, registry, model, base };
+  return {
+    openai,
+    openaiTools,
+    skills,
+    registry,
+    model,
+    base,
+    baseDir: process.cwd(),
+  };
 }
 
 // Print the startup banner. `interactive` controls the trailing "type a
@@ -214,12 +229,17 @@ export function printBanner(state: ChatState, interactive: boolean): void {
   }
   console.log(`  model  : ${color("cyan", state.model)}`);
   console.log(`  api    : ${color("cyan", effectiveBase)}`);
+  // MCP tools (namespaced per server), the built-in file tools, and local-skill
+  // tools all show here so the user sees every callable name up front.
+  const allToolNames = [
+    ...state.openaiTools.map((t) => t.function.name),
+    ...FILE_TOOL_NAMES,
+    ...state.skills.map((s) => s.name),
+  ];
   console.log(
     `  tools  : ${color(
       "cyan",
-      state.openaiTools.length
-        ? state.openaiTools.map((t) => t.function.name).join(", ")
-        : "(none)"
+      allToolNames.length ? allToolNames.join(", ") : "(none)"
     )}`
   );
   if (state.skills.length > 0) {
@@ -252,15 +272,20 @@ export async function runTurn(
   history: ConversationMessage[],
   spinner: Spinner,
 ): Promise<string | null> {
-  const { openai, openaiTools, skills, model } = state;
-  const systemPrompt = SYSTEM_PROMPT + skillSystemBlock(skills);
-  const tools =
-    skills.length > 0
-      ? [...openaiTools, skillTool(skills), runScriptTool(skills)]
-      : openaiTools;
+  const { openai, openaiTools, skills, model, baseDir } = state;
+  const systemPrompt = SYSTEM_PROMPT + skillSystemBlock(skills) + fileSystemBlock();
+  const tools = [
+    ...openaiTools,
+    ...fileTools(),
+    ...(skills.length > 0 ? [skillTool(skills), runScriptTool(skills)] : []),
+  ];
   const callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResult> =
     (name, args) => {
-    // Synthetic local-skill tools; every other name routes to the originating MCP server.
+    // Synthetic local tools (file + skill); every other name routes to the
+    // originating MCP server.
+    if (FILE_TOOL_NAMES.includes(name)) {
+      return callFileTool(baseDir, name, args);
+    }
     if (name === "invoke_skill") {
       return invokeSkill(skills, String(args.name), args.file).then(
         (text) => ({ isError: false, content: [{ type: "text", text }] }),
