@@ -4,8 +4,8 @@
 // helper shape as agent-stub-test.ts) plus a hand-faked callTool resolver.
 import assert from "node:assert/strict";
 
-import { runAgentTurn, SYSTEM_PROMPT } from "./agent.js";
-import type { AgentTurnConfig, CallToolResult } from "./types.js";
+import { runAgentTurn, SYSTEM_PROMPT } from "../agent.js";
+import type { AgentTurnConfig, CallToolResult } from "../types.js";
 
 // Scripted fake OpenAI: `create` returns whatever `script(n)` says for round n.
 function makeFakeModel(

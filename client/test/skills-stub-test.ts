@@ -8,8 +8,8 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runAgentTurn, SYSTEM_PROMPT } from "./agent.js";
-import type { CallToolResult } from "./types.js";
+import { runAgentTurn, SYSTEM_PROMPT } from "../agent.js";
+import type { CallToolResult } from "../types.js";
 import {
   discoverSkills,
   invokeSkill,
@@ -20,8 +20,8 @@ import {
   runScriptTool,
   skillSystemBlock,
   skillTool,
-} from "./skills.js";
-import type { Skill } from "./skills.js";
+} from "../skills.js";
+import type { Skill } from "../skills.js";
 
 // runSkillScript always returns a single text part, so extract it here
 // instead of indexing the content union (which also allows image parts).

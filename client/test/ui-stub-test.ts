@@ -21,10 +21,10 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Spinner, printBanner, runOneShot, runTurn } from "./ui.js";
-import type { ChatState } from "./ui.js";
-import { mcpToolsToOpenai } from "./agent.js";
-import { openAiTools } from "./servers.js";
+import { Spinner, printBanner, runOneShot, runTurn } from "../ui.js";
+import type { ChatState } from "../ui.js";
+import { mcpToolsToOpenai } from "../agent.js";
+import { openAiTools } from "../servers.js";
 import type { OpenAI } from "openai";
 import type {
   CallToolResult,
@@ -33,7 +33,7 @@ import type {
   Registry,
   ServerView,
   Tool,
-} from "./types.js";
+} from "../types.js";
 
 // The fake model is not structurally an OpenAI instance (it lacks apiKey,
 // baseURL, …), so it must be cast. `unknown` casts cleanly to the concrete type.

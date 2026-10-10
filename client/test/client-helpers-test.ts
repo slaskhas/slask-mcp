@@ -5,9 +5,9 @@
 // helpers in agent.ts (mcpToolsToOpenai, createOpenAiClient).
 import assert from "node:assert/strict";
 
-import { textFrom, mcpResultToText, hintFor } from "./client.js";
-import { mcpToolsToOpenai, createOpenAiClient } from "./agent.js";
-import type { CallToolResult } from "./types.js";
+import { textFrom, mcpResultToText, hintFor } from "../client.js";
+import { mcpToolsToOpenai, createOpenAiClient } from "../agent.js";
+import type { CallToolResult } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // textFrom

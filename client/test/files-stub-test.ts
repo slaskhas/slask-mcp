@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { CallToolResult } from "./types.js";
+import type { CallToolResult } from "../types.js";
 import {
   callFileTool,
   editFileInBase,
@@ -25,7 +25,7 @@ import {
   resolveInBase,
   readFileInBase,
   writeFileInBase,
-} from "./files.js";
+} from "../files.js";
 
 // callFileTool always returns a single text part.
 const textOf = (r: CallToolResult): string => {
@@ -264,6 +264,10 @@ const disk = async (p: string): Promise<string> => readFile(p, "utf8");
   assert(req(byName.get("read_file")!) === JSON.stringify(["path"]));
   assert(req(byName.get("edit_file")!) === JSON.stringify(["path", "search", "replace"]));
   assert(req(byName.get("write_file")!) === JSON.stringify(["path", "content"]));
+  const rp = (byName.get("read_file")!.function.parameters) as any;
+  assert(rp.properties.path.type === "string", "read_file.path should be a string");
+  assert(rp.properties.offset.type === "integer", "read_file.offset should be an integer");
+  assert(rp.properties.bytes.type === "integer", "read_file.bytes should be an integer");
   for (const t of tools) {
     assert(t.type === "function", t.function.name);
     const d = t.function.description;
@@ -285,7 +289,7 @@ const disk = async (p: string): Promise<string> => readFile(p, "utf8");
 
   // truncated read surfaces the byte-range header in the router text
   const readBig = await callFileTool(root, "read_file", { path: "big.txt" });
-  assert(/first 65536 bytes of 200000/.test(textOf(readBig)), textOf(readBig));
+  assert(/bytes 0-65536 of 200000/.test(textOf(readBig)), textOf(readBig));
 
   const editRes = await callFileTool(root, "edit_file", {
     path: "route.txt",
@@ -315,6 +319,95 @@ const disk = async (p: string): Promise<string> => readFile(p, "utf8");
   assert(/escapes the launch directory/.test(mEscRouter), mEscRouter);
 
   console.log("PASS test7 — callFileTool routing, truncated header, unknown/escape");
+}
+
+// ---------------------------------------------------------------------------
+// 8. range reads (offset / bytes): correct substring, per-call cap, remaining,
+//    empty/past-EOF, invalid args, range-only binary scan, router headers ----
+// ---------------------------------------------------------------------------
+{
+  // predictable ASCII file (1 byte per char) so byte offsets == char offsets
+  const pat = Array.from(
+    { length: 300 },
+    (_, i) => String.fromCharCode(97 + (i % 26)),
+  ).join("");
+  await writeFile(join(root, "range.txt"), pat, "utf8");
+
+  // plain in-file range -> correct slice + pagination flag
+  const rr = await readFileInBase(root, "range.txt", 100, 30);
+  assert(rr.path === "range.txt", rr.path);
+  assert(rr.content === pat.slice(100, 130), rr.content);
+  assert(rr.totalBytes === 300, String(rr.totalBytes));
+  assert(rr.start === 100, String(rr.start));
+  assert(rr.returnedBytes === 30, String(rr.returnedBytes));
+  assert(rr.truncated === true, String(rr.truncated));
+
+  // bytes > remaining -> returns the rest, not truncated (no next page)
+  const tail = await readFileInBase(root, "range.txt", 290, 50);
+  assert(tail.content === pat.slice(290), tail.content);
+  assert(tail.returnedBytes === 10, String(tail.returnedBytes));
+  assert(tail.truncated === false, String(tail.truncated));
+
+  // offset at file end / past EOF -> empty, nothing to read (clamped start)
+  const atEnd = await readFileInBase(root, "range.txt", 300, 50);
+  assert(
+    atEnd.content === "" && atEnd.returnedBytes === 0 && atEnd.truncated === false,
+  );
+  const past = await readFileInBase(root, "range.txt", 99999, 50);
+  assert(
+    past.content === "" && past.returnedBytes === 0 && past.truncated === false,
+    String(past.start),
+  );
+  assert(past.start === 300, String(past.start));
+
+  // per-call cap: requesting >65536 bytes still returns at most 65536
+  // (big.txt from test 3 = 200000 'a's)
+  const capped = await readFileInBase(root, "big.txt", 1000, 999999);
+  assert(capped.returnedBytes === 65536, String(capped.returnedBytes));
+  assert(capped.truncated === true, String(capped.truncated));
+  assert(capped.content === "a".repeat(65536), String(capped.content.length));
+
+  // invalid offset / bytes -> actionable throws
+  const mOffNeg = await thrown(() => readFileInBase(root, "range.txt", -5, 10));
+  assert(/offset must be a non-negative integer byte offset/.test(mOffNeg), mOffNeg);
+  const mOffNaN = await thrown(() => readFileInBase(root, "range.txt", "abc", 10));
+  assert(/offset must be a non-negative integer byte offset/.test(mOffNaN), mOffNaN);
+  const mBytesZero = await thrown(() => readFileInBase(root, "range.txt", 0, 0));
+  assert(/bytes must be a positive integer byte count/.test(mBytesZero), mBytesZero);
+  const mBytesStr = await thrown(() => readFileInBase(root, "range.txt", 0, "ten"));
+  assert(/bytes must be a positive integer byte count/.test(mBytesStr), mBytesStr);
+
+  // range-only binary scan: a NUL *inside* the requested range is rejected;
+  // a NUL *outside* it is not scanned, so that range reads fine.
+  const bin = Buffer.alloc(300);
+  for (let i = 0; i < 300; i += 1) bin[i] = i === 50 ? 0 : 97 + (i % 26);
+  await writeFile(join(root, "bin-range.txt"), bin);
+  const mInRange = await thrown(() =>
+    readFileInBase(root, "bin-range.txt", 40, 20),
+  );
+  assert(/not a plain text file \(binary content\)/.test(mInRange), mInRange);
+  const okOutside = await readFileInBase(root, "bin-range.txt", 0, 20);
+  assert(
+    okOutside.returnedBytes === 20 && okOutside.truncated === true,
+    String(okOutside.returnedBytes),
+  );
+
+  // router: a range read surfaces the byte range + "next offset" hint; an
+  // empty range surfaces the "nothing to return" message.
+  const rRange = await callFileTool(root, "read_file", {
+    path: "range.txt",
+    offset: 100,
+    bytes: 30,
+  });
+  assert(/bytes 100-130 of 300/.test(textOf(rRange)), textOf(rRange));
+  assert(/more available, next offset 130/.test(textOf(rRange)), textOf(rRange));
+  const rEmpty = await callFileTool(root, "read_file", {
+    path: "range.txt",
+    offset: 99999,
+  });
+  assert(/nothing to return/.test(textOf(rEmpty)), textOf(rEmpty));
+
+  console.log("PASS test8 — range reads (substring, cap, remaining, empty, invalid, binary)");
 }
 
 await rm(root, { recursive: true, force: true });

@@ -108,21 +108,58 @@ export async function resolveExistingInBase(
 // operations (each throws model-actionable Errors)
 // ---------------------------------------------------------------------------
 
+function parseOffset(value: unknown): number {
+  if (value === undefined || value === null) {
+    return 0;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    throw new Error(
+      "offset must be a non-negative integer byte offset (got " +
+        JSON.stringify(value) + ")",
+    );
+  }
+  return n;
+}
+
+function parseBytes(value: unknown): number {
+  if (value === undefined || value === null) {
+    return MAX_READ_BYTES;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+    throw new Error(
+      "bytes must be a positive integer byte count (got " +
+        JSON.stringify(value) + ")",
+    );
+  }
+  return n;
+}
+
 export interface FileReadResult {
   path: string;
   content: string;
   totalBytes: number;
+  start: number;
+  returnedBytes: number;
   truncated: boolean;
 }
 
 /**
  * Read a plain-text file inside the sandbox. Throws on missing or directory
- * targets, binary content, or sandbox escapes. Only the bytes that will be
- * returned are ever loaded off disk.
+ * targets, binary content, or sandbox escapes. Only the requested byte range is
+ * ever loaded off disk (seek + chunked read), so arbitrarily large files can be
+ * read in bounded pages.
+ *
+ * `rawOffset` (0-based byte offset, default 0) and `rawBytes` (byte count, default
+ * `MAX_READ_BYTES`) select the range; the returned bytes are always capped at
+ * `MAX_READ_BYTES`.
  */
 export async function readFileInBase(
   baseDir: string,
   rawPath: unknown,
+  rawOffset?: unknown,
+  rawBytes?: unknown,
 ): Promise<FileReadResult> {
   const abs = resolveInBase(baseDir, rawPath);
   const rel = relOf(baseDir, abs);
@@ -134,31 +171,51 @@ export async function readFileInBase(
   }
   await resolveExistingInBase(baseDir, abs);
 
-  if (st.size === 0) {
-    return { path: rel, content: "", totalBytes: 0, truncated: false };
+  const size = st.size;
+  const offset = parseOffset(rawOffset);
+  const bytes = parseBytes(rawBytes);
+
+  const start = Math.min(offset, size);
+  const available = size - start;
+  if (size === 0 || available === 0) {
+    return {
+      path: rel,
+      content: "",
+      totalBytes: size,
+      start,
+      returnedBytes: 0,
+      truncated: false,
+    };
   }
-  const limit = Math.min(st.size, MAX_READ_BYTES);
+
+  const readLen = Math.min(bytes, available, MAX_READ_BYTES);
   const fd = await open(abs, "r");
   try {
     const chunks: Buffer[] = [];
-    let off = 0;
-    while (off < limit) {
-      let buf = Buffer.alloc(limit - off);
-      const r = await fd.read(buf);
+    let pos = start;
+    const end = start + readLen;
+    while (pos < end) {
+      let buf = Buffer.alloc(end - pos);
+      // Absolute-position read: `position` is an integer byte offset (pread
+      // semantics), so the file's own cursor is left unchanged and each
+      // iteration is independent of the previous one.
+      const r = await fd.read(buf, { position: pos });
       if (r.bytesRead === 0) break;
       if (r.bytesRead < buf.length) buf = buf.subarray(0, r.bytesRead);
       chunks.push(buf);
-      off += r.bytesRead;
+      pos += r.bytesRead;
     }
     const buf = Buffer.concat(chunks);
-    if (!isText(buf)) {
+    if (buf.length > 0 && !isText(buf)) {
       throw new Error(rel + " is not a plain text file (binary content)");
     }
     return {
       path: rel,
       content: buf.toString("utf8"),
-      totalBytes: st.size,
-      truncated: st.size > MAX_READ_BYTES,
+      totalBytes: size,
+      start,
+      returnedBytes: pos - start,
+      truncated: pos < size,
     };
   } finally {
     await fd.close();
@@ -288,16 +345,30 @@ export function fileTools(): OpenAiFunctionTool[] {
         name: "read_file",
         description:
           "Read a plain-text file under the launch directory and return its " +
-          "content (plus byte count). " +
+          "content plus the byte range that was returned. Use `offset` (0-based " +
+          "byte start) and `bytes` (byte count) to read an arbitrary byte range of " +
+          "a large file and paginate: each read is capped at 65536 bytes and the " +
+          "result reports the `next offset` to continue from. " +
           note +
-          " Files above 64 KiB are truncated with a marker; binary files are " +
-          "rejected.",
+          " Binary content (NUL bytes in the returned range) is rejected. Byte " +
+          "reads are byte-oriented: a boundary that splits a multi-byte UTF-8 " +
+          "character renders as a replacement character — nudge `offset` a byte " +
+          "or two for clean boundaries.",
         parameters: {
           type: "object",
           properties: {
             path: {
               type: "string",
               description: "relative path to the file (e.g. 'notes.txt' or 'src/utils.ts')",
+            },
+            offset: {
+              type: "integer",
+              description: "0-based byte offset to start reading from (default: 0)",
+            },
+            bytes: {
+              type: "integer",
+              description:
+                "number of bytes to read from `offset` (default: 65536, the per-read cap)",
             },
           },
           required: ["path"],
@@ -365,12 +436,14 @@ export function fileTools(): OpenAiFunctionTool[] {
 export function fileSystemBlock(): string {
   return (
     "\n\nFile access: you have built-in file tools — `read_file` (inspect a " +
-    "text file), `edit_file` (atomic search-and-replace), and `write_file` " +
-    "(create or overwrite a file, creating parent directories). They are " +
-    "sandboxed to the directory you were launched in and its subdirectories; " +
-    "any path that would leave it (absolute, `..`, or symlink) is rejected by " +
-    "the client. Use `edit_file` for targeted changes and `write_file` only " +
-    "for new files or full rewrites."
+    "text file, optionally a byte range via `offset` and `bytes`), `edit_file` " +
+    "(atomic search-and-replace), and `write_file` (create or overwrite a file, " +
+    "creating parent directories). They are sandboxed to the directory you were " +
+    "launched in and its subdirectories; any path that would leave it (absolute, " +
+    "`..`, or symlink) is rejected by the client. For large files, read them in " +
+    "byte ranges and continue from the `next offset` the result reports. Use " +
+    "`edit_file` for targeted changes and `write_file` only for new files or full " +
+    "rewrites."
   );
 }
 
@@ -388,10 +461,28 @@ export async function callFileTool(
   let text: string;
   switch (name) {
     case "read_file": {
-      const r = await readFileInBase(baseDir, args.path);
-      let header = r.path + ": " + r.totalBytes + " byte" + (r.totalBytes === 1 ? "" : "s");
-      if (r.truncated) {
-        header += " (first " + MAX_READ_BYTES + " bytes of " + r.totalBytes + ")";
+      const r = await readFileInBase(
+        baseDir,
+        args.path,
+        args.offset,
+        args.bytes,
+      );
+      let header =
+        r.path + ": " + r.totalBytes + " byte" + (r.totalBytes === 1 ? "" : "s");
+      if (r.returnedBytes === 0) {
+        header +=
+          " — nothing to return (offset " +
+          r.start +
+          " is at or past the file's end)";
+      } else {
+        const end = r.start + r.returnedBytes;
+        const range =
+          "(bytes " + r.start + "-" + end + " of " + r.totalBytes + ")";
+        if (r.truncated) {
+          header += " " + range + "; more available, next offset " + end;
+        } else if (r.start > 0) {
+          header += " " + range;
+        }
       }
       text = r.content === "" ? header : header + "\n" + r.content;
       break;

@@ -7,7 +7,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadEnvFile } from "./env.js";
+import { loadEnvFile } from "../env.js";
 
 // Unique suffix so we never collide with the real environment; every key we
 // touch is tracked and removed at the end.

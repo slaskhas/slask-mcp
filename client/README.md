@@ -295,14 +295,21 @@ agent (they appear in the startup banner alongside server and skill tools):
 
 | Tool            | What it does                                             | Required args             |
 |-----------------|----------------------------------------------------------|---------------------------|
-| `read_file`     | read a plain-text file, returning its content + byte count | `path`               |
+| `read_file`     | read a plain-text file — the whole file, or a byte range via `offset`/`bytes` | `path`, optional `offset`, `bytes` |
 | `edit_file`     | atomic search-and-replace; never modifies unless it succeeds | `path`, `search`, `replace`, optional `replaceAll` |
 | `write_file`    | create or overwrite a file (parent dirs created as needed) | `path`, `content` |
 
-- **`read_file(path)`** returns the file text, its total byte count, and a
-  `truncated` flag. Files above 64 KiB are truncated to the first 64 KiB
-  (with a note in the tool result) so one result can't blow up context;
-  binary content (NUL bytes) is rejected with an actionable error.
+- **`read_file(path, offset?, bytes?)`** returns the file text, its total
+  byte count, and a `truncated` flag. The default read covers bytes from 0
+  up to 64 KiB; for larger files, read a byte subset instead. Pass an
+  optional 0-based byte offset (`offset`) and a byte count (`bytes`) to
+  read any range — e.g. `read_file("big.txt", 65536, 65536)` reads bytes
+  65536–131071 — and continue from the `next offset` the result reports to
+  page through the file. Every read is capped at 65536 bytes (the per-call
+  limit), reads are byte-oriented (a boundary that splits a multi-byte
+  UTF-8 character renders as a replacement character — nudge `offset` a
+  byte or two for a clean boundary), and a NUL byte inside the returned
+  range is rejected as binary content with an actionable error.
 - **`edit_file(path, search, replace[, replaceAll])`** implements "read → edit
   in memory → write back" as a *single atomic client step*: the file is only
   rewritten when the edit succeeds. `search` must match exactly once (or
