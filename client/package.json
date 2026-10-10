@@ -20,7 +20,8 @@
     "test:agent-edges": "node dist/agent-edges-test.js",
     "test:env": "node dist/env-test.js",
     "test:ui": "node dist/ui-stub-test.js",
-    "test:all": "node dist/skills-stub-test.js && node dist/cli-parse-test.js && node dist/servers-test.js && node dist/client-helpers-test.js && node dist/agent-edges-test.js && node dist/env-test.js && node dist/ui-stub-test.js",
+    "test:files": "node dist/files-stub-test.js",
+    "test:all": "node dist/skills-stub-test.js && node dist/cli-parse-test.js && node dist/servers-test.js && node dist/client-helpers-test.js && node dist/agent-edges-test.js && node dist/env-test.js && node dist/ui-stub-test.js && node dist/files-stub-test.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

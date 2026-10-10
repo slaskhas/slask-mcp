@@ -288,6 +288,44 @@ The chat REPL has a `/skills` command that lists the same information; a skill's
 bundled scripts are also shown in the startup banner and via the agent's
 `run_skill_script` tool.
 
+## File tools
+
+The client ships three **built-in** file tools that are always available to the
+agent (they appear in the startup banner alongside server and skill tools):
+
+| Tool            | What it does                                             | Required args             |
+|-----------------|----------------------------------------------------------|---------------------------|
+| `read_file`     | read a plain-text file, returning its content + byte count | `path`               |
+| `edit_file`     | atomic search-and-replace; never modifies unless it succeeds | `path`, `search`, `replace`, optional `replaceAll` |
+| `write_file`    | create or overwrite a file (parent dirs created as needed) | `path`, `content` |
+
+- **`read_file(path)`** returns the file text, its total byte count, and a
+  `truncated` flag. Files above 64 KiB are truncated to the first 64 KiB
+  (with a note in the tool result) so one result can't blow up context;
+  binary content (NUL bytes) is rejected with an actionable error.
+- **`edit_file(path, search, replace[, replaceAll])`** implements "read → edit
+  in memory → write back" as a *single atomic client step*: the file is only
+  rewritten when the edit succeeds. `search` must match exactly once (or
+  pass `replaceAll: true` to change every occurrence); an empty `replace`
+  deletes the match. This avoids re-sending the whole file to a small model
+  with a 1024-token completion cap.
+- **`write_file(path, content)`** creates or overwrites a plain-text file,
+  creating any missing parent directories along the way.
+
+**Sandbox (enforced in client code, not by the agent).** All three tools only
+touch paths under the **launch directory** — the directory where
+`slask-client` was started — and its subdirectories. Refused by the client,
+as model-actionable `ERROR calling …` feed-back:
+
+- empty, absolute, or relative paths that resolve outside the launch dir
+  (`..`, `../..`, `a/../../etc` — any depth);
+- symlinks inside the launch directory that resolve to files *outside* it
+  (including symlinked directories or symlinked parent paths for `write_file`).
+
+The tools never touch the parent directory, any upstream directory, or
+neighbouring folders — and since this check is in `files.ts`, no prompt
+engineering or model "good behaviour" can weaken it.
+
 ## Options & environment
 
 | Command           | Flag| Env var        | Description                                                                                                 |
