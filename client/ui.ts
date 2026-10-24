@@ -24,6 +24,7 @@ import {
   mcpToolsToOpenai,
   runAgentTurn,
 } from "./agent.js";
+import { listModelSelections, resolveModel } from "./models.js";
 import type {
   CallToolResult,
   ConversationMessage,
@@ -173,6 +174,7 @@ const REPLY_HELP = [
   "  /skills   list local skills (./skills/)",
   "  /reset    clear the conversation history",
   "  /compact  summarize the conversation so far, reclaiming context",
+  "  /model    switch the active model to a catalog model (/model <provider/id>; bare /model lists them)",
   "  /schedule manage scheduled jobs (add/list/rm)",
   "  /ralph    plan/run autonomous Ralph loops (coding or research); /ralph alone for help",
   "  /quit     (or /exit, /q, or Ctrl+C) leave the REPL",
@@ -277,11 +279,15 @@ export function parseScheduleCmd(line: string): ScheduleParse | null {
 // only supported mechanism (and the only one without a TUI dependency). It
 // runs on each Tab: if all candidates share a prefix that extends the typed
 // word, the rest is inserted; otherwise a second Tab prints the full list.
-// The completer must always return a 2-element array.
+// The completer must always return a 2-element array. `/model` completes a
+// catalog `provider/id` against the loaded selection list (the `modelChoices`
+// param); that list is loaded once at REPL start so the per-Tab completer can
+// remain synchronous. With `modelChoices` omitted `/model` gives no hint and
+// falls to the no-match default.
 // ---------------------------------------------------------------------------
 const SLASH_COMMANDS = [
   "help", "tools", "skills", "reset", "clear",
-  "compact", "summarize", "schedule", "ralph",
+  "compact", "summarize", "model", "schedule", "ralph",
   "quit", "exit",
 ];
 // Kept in sync with parseScheduleCmd (below) and the /schedule help text.
@@ -291,12 +297,16 @@ const RALPH_SUBCOMMANDS = [
   "add", "check", "init", "list", "plan", "reopen", "report", "spec", "split", "start", "status", "stop",
 ];
 
-export function slashCompletions(line: string): [string[], string] {
+export function slashCompletions(
+  line: string,
+  modelChoices?: readonly string[],
+): [string[], string] {
   const trimmed = line.trim();
   if (!trimmed.startsWith("/")) return [[], ""];
   const parts = trimmed.split(/\s+/).filter(Boolean);
   const first = parts[0];
   const last = parts[parts.length - 1];
+  const lowerFirst = first.toLowerCase();
 
   let candidates: string[];
   let completeOn: string;
@@ -305,10 +315,16 @@ export function slashCompletions(line: string): [string[], string] {
     // Strip the slash from completeOn so readline's replace branch never
     // rewrites the leading `/` of the line.
     completeOn = first.replace(/^\//, "");
-  } else if (first.toLowerCase() === "/schedule") {
+  } else if (lowerFirst === "/schedule") {
     candidates = SCHEDULE_SUBCOMMANDS;
     completeOn = last;
-  } else if (first.toLowerCase() === "/ralph") {
+  } else if (lowerFirst === "/model" && modelChoices !== undefined) {
+    // `/model` completes a catalog `provider/id`. The loaded selection list is
+    // passed in so this stays synchronous (readline's completer must run per
+    // Tab, not await).
+    candidates = [...modelChoices];
+    completeOn = last;
+  } else if (lowerFirst === "/ralph") {
     candidates = RALPH_SUBCOMMANDS;
     completeOn = last;
   } else {
@@ -393,6 +409,31 @@ async function buildChatState(options: {
     maxTokens: options.maxTokens,
     baseDir: process.cwd(),
   };
+}
+
+// Switch the live agent to another catalog model. Resolves the selection,
+// recreates the OpenAI client against the resolved endpoint/key (a different
+// provider changes base + key), and applies the new name, selection, and output
+// capability ceiling to `state`. The MCP tool list and discovered skills are
+// independent of the model, so they are left untouched.
+//
+// Throws on an unknown/ambiguous selection or an unresolvable client config —
+// the caller (the REPL) catches it, reports, and leaves `state` untouched
+// (the previous model stays active).
+export async function switchModel(
+  state: ChatState,
+  selection: string,
+): Promise<void> {
+  const resolved = await resolveModel(process.cwd(), { selection });
+  const openai = createOpenAiClient({
+    base: resolved.baseUrl,
+    apiKey: resolved.apiKey,
+  });
+  state.openai = openai;
+  state.model = resolved.name;
+  state.selection = resolved.selection;
+  state.base = resolved.baseUrl;
+  state.maxTokens = resolved.maxTokens;
 }
 
 // Print the startup banner. `interactive` controls the trailing "type a
@@ -645,12 +686,23 @@ export async function startChat({
   openai?: InstanceType<typeof OpenAI>;
 }): Promise<void> {
   const state = await buildChatState({ registry, model, base, apiKey, maxTokens, selection, openai });
+  // Load the catalog's `provider/id` selection list once, before the REPL
+  // starts, so the readline completer (which must be synchronous — it runs
+  // on each Tab, not awaited) can complete `/model` against it.
+  let modelChoices: string[];
+  try {
+    modelChoices = await listModelSelections(process.cwd());
+  } catch {
+    modelChoices = [];
+  }
+  const completer = (line: string): [string[], string] =>
+    slashCompletions(line, modelChoices);
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
-    // Tab hints for slash commands (top-level and /schedule + /ralph
-    // subcommands); see slashCompletions for the readline contract.
-    completer: slashCompletions,
+    // Tab hints for slash commands: top-level, /schedule + /ralph subcommands,
+    // and /model (model selection); see slashCompletions for the contract.
+    completer: completer,
   });
   const spinner = new Spinner();
   const history: ConversationMessage[] = [];
@@ -686,6 +738,7 @@ export async function startChat({
       const input = line.trim();
       if (input === "") return loop();
 
+      const parts = input.split(/\s+/).filter(Boolean);
       const cmd = input.toLowerCase();
       if (cmd === "/help" || cmd === "/h") {
         process.stdout.write("\n");
@@ -838,6 +891,39 @@ export async function startChat({
           }
           return loop();
         }
+      }
+      // /model — switch the live agent to another catalog model.
+      //   /model <provider/id>        switch to that catalog model (Tab-hints)
+      //   /model                     print the available models
+      // Resolution + client re-creation are in switchModel; on failure the
+      // previous model stays active.
+      if (parts.length > 0 && parts[0].toLowerCase() === "/model") {
+        process.stdout.write("\n");
+        const selectionArg = parts[1] ?? "";
+        if (selectionArg === "") {
+          console.log(
+            color("green", "  switch the active model:  /model <provider/id>\n")
+          );
+          if (modelChoices.length === 0) {
+            console.log(color("dim", "  (no models in models.json — add one first)\n"));
+          } else {
+            for (const m of modelChoices) {
+              console.log(`  ${m}`);
+            }
+          }
+          return loop();
+        }
+        try {
+          await switchModel(state, selectionArg);
+        } catch (e) {
+          console.log(
+            color("red", `  ✖ ${e instanceof Error ? e.message : String(e)}`)
+          );
+          return loop();
+        }
+        console.log(color("green", "  model switched.\n"));
+        printBanner(state, true);
+        return loop();
       }
       // /ralph — manage Ralph runs. `plan` hands a drafting prompt to the model.
       let turnInput = input;

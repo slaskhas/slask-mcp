@@ -29,10 +29,12 @@ import {
   summarizeHistory,
   replaceHistoryWithSummary,
   slashCompletions,
+  switchModel,
 } from "../ui.js";
 import type { ChatState } from "../ui.js";
 import { mcpToolsToOpenai } from "../agent.js";
 import { openAiTools } from "../servers.js";
+import { saveModelsFile, type ModelFile } from "../models.js";
 import type { OpenAI } from "openai";
 import type {
   CallToolResult,
@@ -513,8 +515,9 @@ try {
       line: string,
       expected: [string[], string],
       label: string,
+      modelChoices?: readonly string[],
     ): void => {
-      const [cand, completeOn] = slashCompletions(line);
+      const [cand, completeOn] = slashCompletions(line, modelChoices);
       assert(
         JSON.stringify(cand) === JSON.stringify(expected[0]),
         `${label}: candidates ${JSON.stringify(cand)}`
@@ -524,7 +527,7 @@ try {
 
     const allTop = [
       "help", "tools", "skills", "reset", "clear",
-      "compact", "summarize", "schedule", "ralph",
+      "compact", "summarize", "model", "schedule", "ralph",
       "quit", "exit",
     ];
     const scheduleSubs = ["add", "list", "rm"];
@@ -563,6 +566,25 @@ try {
     assertPairs("/schedule xyz", [scheduleSubs, "xyz"], "/schedule xyz no-hit fallback");
     assertPairs("/SCHEDULE a", [["add"], "a"], "/SCHEDULE a case-insensitive first token");
 
+    // /model subcommand completion — catalog `provider/id`. Completes only when
+    // `modelChoices` is supplied (the REPL loads it once at start); bare `/model`
+    // still auto-completes to itself via the top-level path (single-token branch
+    // is checked before the subcommand branch).
+    const modelChoices = [
+      "ollama/qwen2.5:14b",
+      "custom-proxy/llama-3.1-8b",
+      "real-openai/gpt-4o-mini",
+    ];
+    // Single token -> top-level path (modelChoices irrelevant): completes to itself.
+    assertPairs("/model", [["model"], "model"], "/model alone -> self");
+    // With choices: unique prefix auto-completes to a full provider/id.
+    assertPairs("/model oll", [["ollama/qwen2.5:14b"], "oll"], "/model oll", modelChoices);
+    assertPairs("/model c", [["custom-proxy/llama-3.1-8b"], "c"], "/model c", modelChoices);
+    // No hit -> full selection list as fallback (second Tab prints it).
+    assertPairs("/model z", [modelChoices, "z"], "/model z no-hit fallback", modelChoices);
+    // No modelChoices -> no hint (falls to the no-match default).
+    assertPairs("/model foo", [[], ""], "/model foo no choices");
+
     // /ralph subcommand completion.
     // "st" matches start/status/stop (three) -> no unique extension; second Tab
     // lists all three in array order.
@@ -579,7 +601,100 @@ try {
     assertPairs("/foo bar", [[], ""], "/foo bar");
     assertPairs("/schedule add", [["add"], "add"], "/schedule add exact");
 
-    console.log("PASS test8 — slashCompletions top-level + /schedule + /ralph");
+    console.log("PASS test8 — slashCompletions top-level + /schedule + /ralph + /model");
+  }
+
+  // ---- Test 9: switchModel — swap the live REPL agent's model ----------
+  //   Seeds a two-provider catalog into the scratch cwd, then applies a bare
+  //   id and a full provider/id selection via switchModel. Asserts the resolved
+  //   name/base/maxTokens land on state and a new OpenAI client is installed,
+  //   while the MCP tool list and skills stay untouched. An unknown selection
+  //   throws and leaves the prior (ollama) model exactly as it was.
+  {
+    const { registry } = makeRegistry([mkTool("echo")]);
+    // Two providers: `ollama` (no apiKey, no /v1 in its base) and a keyed
+    // `custom-proxy` — covers both the env-key fallback and explicit-key paths.
+    await saveModelsFile(
+      workDir,
+      {
+        models: {
+          providers: {
+            ollama: {
+              baseUrl: "http://54.244.44.99:11434",
+              models: [
+                {
+                  id: "qwen2.5:14b",
+                  name: "qwen2.5:14b",
+                  contextWindow: 65535,
+                  maxTokens: 65535,
+                },
+              ],
+            },
+            "custom-proxy": {
+              baseUrl: "http://localhost:4000",
+              apiKey: "LITELLM_KEY",
+              models: [
+                {
+                  id: "llama-3.1-8b",
+                  name: "Llama 3.1 8B",
+                  contextWindow: 128000,
+                  maxTokens: 32000,
+                },
+              ],
+            },
+          },
+        },
+      } satisfies ModelFile
+    );
+    const state = makeState(
+      [mkTool("echo")],
+      registry,
+      makeFakeModel((n) => choice({ content: "x" }, "stop"))
+    );
+    const beforeOpenai = state.openai;
+    const beforeOpenaiTools = state.openaiTools;
+    const beforeSkills = state.skills;
+
+    // Bare id, unique across providers -> resolves under the only provider
+    // carrying it (custom-proxy); /v1 appended to the raw base.
+    await switchModel(state, "llama-3.1-8b");
+    const s1 = { selection: state.selection, model: state.model, base: state.base, maxTokens: state.maxTokens };
+    assert(s1.selection === "custom-proxy/llama-3.1-8b");
+    assert(s1.model === "Llama 3.1 8B", `model: ${s1.model}`);
+    assert(s1.base === "http://localhost:4000/v1", `base: ${s1.base}`);
+    assert(s1.maxTokens === 32000);
+    assert(state.openai !== beforeOpenai, "new OpenAI client expected");
+    assert(state.openaiTools === beforeOpenaiTools, "tools must stay put");
+    assert(state.skills === beforeSkills, "skills must stay put");
+
+    // Full provider/id -> ollama (no apiKey -> env/"local" fallback; raw base
+    // normalized to /v1).
+    await switchModel(state, "ollama/qwen2.5:14b");
+    const s2 = { selection: state.selection, model: state.model, base: state.base, maxTokens: state.maxTokens };
+    assert(s2.selection === "ollama/qwen2.5:14b");
+    assert(s2.model === "qwen2.5:14b", `model: ${s2.model}`);
+    assert(s2.base === "http://54.244.44.99:11434/v1", `base: ${s2.base}`);
+    assert(s2.maxTokens === 65535);
+    assert(state.openai !== beforeOpenai);
+
+    // Unknown selection throws and leaves the prior (ollama) model active.
+    const afterFail = {
+      model: state.model,
+      base: state.base,
+      selection: state.selection,
+      openai: state.openai,
+    };
+    await assert.rejects(
+      switchModel(state, "nope"),
+      (e) => (e instanceof Error ? e.message : String(e)).includes('unknown model "nope"'),
+      `switchModel('nope') should reject`
+    );
+    assert(state.model === afterFail.model);
+    assert(state.base === afterFail.base);
+    assert(state.selection === afterFail.selection);
+    assert(state.openai === afterFail.openai);
+
+    console.log("PASS test9 — switchModel: bare id + provider/id + unknown leaves state intact");
   }
 
   console.log("\nALL UI STUB TESTS PASSED");

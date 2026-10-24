@@ -36,6 +36,7 @@ import {
 } from "../agent.js";
 import {
   flagValue,
+  listModelSelections,
   loadModelsFile,
   resolveModel,
   saveModelsFile,
@@ -763,6 +764,40 @@ try {
     const r = flagValue(["--model="], "--model");
     assert(r === null, `empty --name= -> null: ${JSON.stringify(r)}`);
     console.log("PASS test35 — flagValue empty --name= value -> null");
+  }
+
+  // ---- Test 36: listModelSelections — flat `provider/id` list for /model Tab hints --
+  {
+    const d = await freshDir("t36-list");
+    await writeModels(
+      d,
+      JSON.stringify({
+        models: { providers: {
+          alpha: { models: [ { id: "x", name: "x" }, { id: "y", name: "y" } ] },
+          beta:  { models: [ { id: "z", name: "z" } ] },
+        } },
+      }),
+    );
+    const sel = await listModelSelections(d);
+    // Flat list, in provider/model JSON insertion order (not sorted).
+    assert(
+      JSON.stringify(sel) === JSON.stringify(["alpha/x", "alpha/y", "beta/z"]),
+      `listModelSelections: ${JSON.stringify(sel)}`
+    );
+    console.log("PASS test36 — listModelSelections flat provider/id in JSON order");
+  }
+
+  // ---- Test 37: listModelSelections missing file -> [] (read-only, does not seed) ---
+  {
+    const d = await freshDir("t37-list-missing");
+    const sel = await listModelSelections(d);
+    assert(sel.length === 0, `missing file -> []: ${JSON.stringify(sel)}`);
+    // read-only: no models.json may appear (seed only happens on resolveModel/ensure).
+    assert(
+      await readFile(join(d, "models.json")).catch(() => "gone") === "gone",
+      "listModelSelections must not seed models.json"
+    );
+    console.log("PASS test37 — listModelSelections missing file -> [] (no seed)");
   }
 
   console.log("\nALL MODELS TESTS PASSED");

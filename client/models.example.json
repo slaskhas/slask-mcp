@@ -1,6 +1,18 @@
 {
   "models": {
     "providers": {
+      "ollama": {
+        "baseUrl": "http://54.244.44.99:11434",
+        "apiKey": "ollama",
+        "models": [
+          {
+            "id": "qwen2.5:14b",
+            "name": "qwen2.5:14b",
+            "contextWindow": 65535,
+            "maxTokens": 65535
+          }
+        ]
+      },
       "custom-proxy": {
         "baseUrl": "http://localhost:4000/v1",
         "apiKey": "LITELLM_KEY",
