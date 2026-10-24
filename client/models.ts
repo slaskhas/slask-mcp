@@ -497,6 +497,22 @@ export async function resolveModel(
 }
 
 // ---------------------------------------------------------------------------
+// Completion list — flat `provider/id` entries of the current catalog, in
+// provider/model JSON order. Backs the REPL's `/model` Tab completion: the REPL
+// loads this once (before the readline interface) so the per-Tab completer can
+// stay synchronous. Read-only — does *not* seed `models.json`; the caller is
+// expected to have already resolved a model (which seeds it). Returns `[]`
+// when there is no readable catalog in `cwd`.
+export async function listModelSelections(cwd: string): Promise<string[]> {
+  const file = await loadModelsFile(cwd);
+  if (file === null) return [];
+  const { providers } = file.models;
+  return Object.entries(providers).flatMap(([pid, def]) =>
+    def.models.map((e) => `${pid}/${e.id}`),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Small argv helper
 // ---------------------------------------------------------------------------
 

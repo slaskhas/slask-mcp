@@ -258,7 +258,9 @@ slask-agent >
 | /skills   | list local skills (./skills/)                 |
 | /reset    | clear the conversation history                |
 | /compact  | summarize the conversation, reclaiming context|
+| /model    | switch the active model: /model <provider/id> |
 | /schedule | manage scheduled jobs (`add` / `list` / `rm`) |
+| /ralph    | plan/run Ralph loops (coding or research)     |
 | /quit     | exit the REPL (or /exit, /q, Ctrl+C)          |
 
 ### One-shot prompts
