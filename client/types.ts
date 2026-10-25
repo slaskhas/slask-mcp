@@ -142,6 +142,12 @@ export interface AgentTurnConfig {
    */
   maxTokens?: number;
   /**
+   * Per-turn tool round-trip budget override. When set to a positive integer it
+   * wins over the `SLASK_MAX_TOOL_ITERATIONS` env knob and the default; otherwise
+   * those apply. The REPL's `/budget` command stores this on the chat state.
+   */
+  maxIterations?: number;
+  /**
    * Tool(s) the turn must end with: if the model answers in prose (or its reply is
    * cut off) before one of them has been called successfully, it is told to call one
    * now (at most twice) instead of the turn ending without the result. Used for
