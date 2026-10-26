@@ -527,7 +527,7 @@ try {
 
     const allTop = [
       "help", "tools", "skills", "reset", "clear",
-      "compact", "summarize", "model", "schedule", "ralph",
+      "compact", "summarize", "model", "budget", "schedule", "ralph",
       "quit", "exit",
     ];
     const scheduleSubs = ["add", "list", "rm"];
@@ -560,8 +560,8 @@ try {
     assertPairs("/schedule a", [["add"], "a"], "/schedule a");
     assertPairs("/schedule l", [["list"], "l"], "/schedule l");
     assertPairs("/schedule rm", [["rm"], "rm"], "/schedule rm");
-    // Single token -> top-level path: filter all 11 by the typed word, so the
-    // fully-typed command yields just itself (already complete).
+    // Single token -> top-level path: filter the full top-level list by the typed
+    // word, so the fully-typed command yields just itself (already complete).
     assertPairs("/schedule", [["schedule"], "schedule"], "/schedule alone -> self");
     assertPairs("/schedule xyz", [scheduleSubs, "xyz"], "/schedule xyz no-hit fallback");
     assertPairs("/SCHEDULE a", [["add"], "a"], "/SCHEDULE a case-insensitive first token");

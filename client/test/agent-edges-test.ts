@@ -4,7 +4,7 @@
 // helper shape as agent-stub-test.ts) plus a hand-faked callTool resolver.
 import assert from "node:assert/strict";
 
-import { runAgentTurn, SYSTEM_PROMPT } from "../agent.js";
+import { runAgentTurn, SYSTEM_PROMPT, MAX_TOOL_ITERATIONS } from "../agent.js";
 import type { AgentTurnConfig, CallToolResult } from "../types.js";
 
 // Scripted fake OpenAI: `create` returns whatever `script(n)` says for round n.
@@ -89,10 +89,11 @@ const asyncThrown = async (f: () => Promise<unknown>): Promise<string> => {
   const fake = makeFakeModel((n: number) =>
     choice({ tool_calls: [toolCall(`c${n}`, "echo", `{"x":${n}}`)] }, "tool_calls")
   );
+  const capMsg = `stopped after ${MAX_TOOL_ITERATIONS} tool calls in one turn (safety cap)`;
   const message = await asyncThrown(() => runAgentTurn(cfg(fake, fn), []));
-  assert(/stopped after 8 tool calls in one turn \(safety cap\)/.test(message), `message: ${message}`);
-  assert(calls.length === 8, `expected 8 calls, got ${calls.length}`);
-  console.log("PASS test1 — safety cap stops after 8 tool calls");
+  assert(message.includes(capMsg), `message: ${message}`);
+  assert(calls.length === MAX_TOOL_ITERATIONS, `expected ${MAX_TOOL_ITERATIONS} calls, got ${calls.length}`);
+  console.log(`PASS test1 — safety cap stops after ${MAX_TOOL_ITERATIONS} tool calls`);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,64 @@ const asyncThrown = async (f: () => Promise<unknown>): Promise<string> => {
   assert(calls[0].name === "ghost", `called: ${calls[0].name}`);
   assert(answer.length > 0, "expected a final answer after a failing tool");
   console.log("PASS test5 — failing tool call survives (error feed-back)");
+}
+
+// ---------------------------------------------------------------------------
+// 6. The per-turn tool budget is independent of earlier turns: a turn that
+//    uses 6 of the budget leaves the NEXT turn with a full fresh budget
+//    (MAX_TOOL_ITERATIONS), not a leaked MAX_TOOL_ITERATIONS-6. (Guard against
+//    any counter leaking across runAgentTurn calls / carrying over between
+//    dialog messages.)
+// ---------------------------------------------------------------------------
+{
+  const { calls: callsA, fn: fnA } = makeCaller();
+  const { calls: callsB, fn: fnB } = makeCaller();
+
+  // Turn 1: 6 tool rounds, then an answer. (If the budget leaked across turns,
+  // turn 2 below would have MAX_TOOL_ITERATIONS-6, not a full one.)
+  const turn1 = await runAgentTurn(
+    cfg(
+      makeFakeModel((n: number) => {
+        if (n <= 6)
+          return choice({ tool_calls: [toolCall(`t1-${n}`, "echo", `{"x":${n}}`)] }, "tool_calls");
+        return choice({ content: "Done after 6 tool rounds." }, "stop");
+      }),
+      fnA
+    ),
+    []
+  );
+  assert(callsA.length === 6, `turn1 calls: ${callsA.length}`);
+  assert(
+    turn1 === "Done after 6 tool rounds.",
+    `turn1 answer: ${turn1}`
+  );
+
+  // Turn 2: a FRESH full budget. It exhausts the whole budget, so it can make
+  // MAX_TOOL_ITERATIONS tool rounds — not just (MAX_TOOL_ITERATIONS - 6), which a
+  // leaking/accumulating counter would leave it with.
+  const turn2Msg = await asyncThrown(
+    () =>
+      runAgentTurn(
+        cfg(
+          makeFakeModel((n: number) =>
+            choice({ tool_calls: [toolCall(`t2-${n}`, "echo", `{"x":${n}}`)] }, "tool_calls")
+          ),
+          fnB
+        ),
+        []
+      )
+  );
+  assert(
+    callsB.length === MAX_TOOL_ITERATIONS,
+    `turn2 calls (must be a full fresh budget of ${MAX_TOOL_ITERATIONS}, not ${MAX_TOOL_ITERATIONS - 6}): ${callsB.length}`
+  );
+  assert(
+    turn2Msg.includes(
+      `stopped after ${MAX_TOOL_ITERATIONS} tool calls in one turn (safety cap)`
+    ),
+    `turn2 message: ${turn2Msg}`
+  );
+  console.log("PASS test6 — per-turn tool budget is independent (resets each turn)");
 }
 
 console.log("\nALL AGENT EDGES TESTS PASSED");

@@ -28,12 +28,12 @@ import type {
 export const DEFAULT_MODEL = "gpt-4o-mini"; // cheap/fast for real OpenAI; override via models.json/MODEL/OPENAI_MODEL/--model
 export const DEFAULT_API_BASE = "https://api.openai.com"; // normalize to /v1 below
 export const DEFAULT_CONTEXT_TOKENS = 32000; // model context window fallback; see models.json / MAX_CONTEXT_TOKENS
-const MAX_TOOL_ITERATIONS = 8; // safety cap: tool round-trips per turn
+export const MAX_TOOL_ITERATIONS = 12; // safety cap: default tool round-trips per turn
 const MAX_TOKENS = 1024; // hard cap on each completion
 
 // Both caps are overridable by env (read per turn). Ralph iterations set higher
 // values for their child processes — real coding turns need many tool rounds.
-function envInt(name: string, fallback: number): number {
+export function envInt(name: string, fallback: number): number {
   const n = Number.parseInt(process.env[name] ?? "", 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
@@ -211,7 +211,14 @@ export async function runAgentTurn(
   onToolCall?: (record: ToolCallRecord) => void,
 ): Promise<string> {
   const { openai, model, systemPrompt, tools, callTool, maxTokens: modelCap } = cfg;
-  const maxIterations = envInt("SLASK_MAX_TOOL_ITERATIONS", MAX_TOOL_ITERATIONS);
+  // Per-turn tool-cap precedence: the caller's runtime value (set by the REPL's
+  // `/budget` command) wins, then the `SLASK_MAX_TOOL_ITERATIONS` env knob,
+  // then the default. Ralph sets the env knob in each child process.
+  const runtimeCap = cfg.maxIterations;
+  const maxIterations =
+    runtimeCap !== undefined && Number.isInteger(runtimeCap) && runtimeCap > 0
+      ? runtimeCap
+      : envInt("SLASK_MAX_TOOL_ITERATIONS", MAX_TOOL_ITERATIONS);
   // Completion cap: a valid SLASK_MAX_TOKENS env knob (the user, or Ralph's
   // window-fit budget) wins, clamped to the model's declared output capability
   // so a completion can never exceed it; otherwise the model's capability, and
@@ -235,6 +242,10 @@ export async function runAgentTurn(
     ...requestMessages,
   ];
 
+  // The tool budget is per-turn by design: every call to runAgentTurn (i.e. each
+  // message the REPL answers) gets its own fresh `maxIterations`. No counter is
+  // shared across turns, so a budget exhausted on one turn cannot shrink the next
+  // — each new message starts with the full budget again.
   for (let i = 0; i < maxIterations; i++) {
     messages = pruneMessages(messages, contextChars);
     const res = await openai.chat.completions.create({
@@ -321,5 +332,9 @@ export async function runAgentTurn(
     return message.content ?? "";
   }
 
-  throw new Error(`stopped after ${maxIterations} tool calls in one turn (safety cap)`);
+  throw new Error(
+    `stopped after ${maxIterations} tool calls in one turn (safety cap); the per-turn ` +
+    `tool budget resets with each new message. If a task legitimately needs more ` +
+    `rounds, raise the cap with SLASK_MAX_TOOL_ITERATIONS.`
+  );
 }

@@ -8,7 +8,7 @@
 // (no TUI lib). `runOneShot` runs a single agent turn for a prompt and exits,
 // used by the `--prompt` flag.
 //
-// REPL commands: /help /h  /tools /t  /skills /s  /reset /clear /c  /compact /summarize  /schedule add|list|rm  /ralph  /quit /exit /q
+// REPL commands: /help /h  /tools /t  /skills /s  /reset /clear /c  /compact /summarize  /budget  /schedule add|list|rm  /ralph  /quit /exit /q
 
 import { createInterface } from "node:readline";
 import type { Writable } from "node:stream";
@@ -21,6 +21,8 @@ import {
   DEFAULT_MODEL,
   SYSTEM_PROMPT,
   createOpenAiClient,
+  envInt,
+  MAX_TOOL_ITERATIONS,
   mcpToolsToOpenai,
   runAgentTurn,
 } from "./agent.js";
@@ -175,6 +177,7 @@ const REPLY_HELP = [
   "  /reset    clear the conversation history",
   "  /compact  summarize the conversation so far, reclaiming context",
   "  /model    switch the active model to a catalog model (/model <provider/id>; bare /model lists them)",
+  "  /budget set the per-turn tool cap (/budget <N>; bare shows the current cap)",
   "  /schedule manage scheduled jobs (add/list/rm)",
   "  /ralph    plan/run autonomous Ralph loops (coding or research); /ralph alone for help",
   "  /quit     (or /exit, /q, or Ctrl+C) leave the REPL",
@@ -287,7 +290,7 @@ export function parseScheduleCmd(line: string): ScheduleParse | null {
 // ---------------------------------------------------------------------------
 const SLASH_COMMANDS = [
   "help", "tools", "skills", "reset", "clear",
-  "compact", "summarize", "model", "schedule", "ralph",
+  "compact", "summarize", "model", "budget", "schedule", "ralph",
   "quit", "exit",
 ];
 // Kept in sync with parseScheduleCmd (below) and the /schedule help text.
@@ -356,6 +359,12 @@ export interface ChatState {
    * completion cap; with the knob set it only acts as an upper bound on it.
    */
   maxTokens?: number;
+  /**
+   * Per-turn tool round-trip cap for this session, set by `/budget <N>`.
+   * When `undefined`, turns fall back to the `SLASK_MAX_TOOL_ITERATIONS` env knob
+   * / default.
+   */
+  maxToolIterations?: number;
   baseDir: string;
 }
 
@@ -563,6 +572,7 @@ export async function runTurn(
         callTool,
         requireTool: requiredToolsForRole(),
         maxTokens: state.maxTokens,
+        maxIterations: state.maxToolIterations,
       },
       history,
       onToolCall
@@ -923,6 +933,35 @@ export async function startChat({
         }
         console.log(color("green", "  model switched.\n"));
         printBanner(state, true);
+        return loop();
+      }
+      // /budget — set (or view) the per-turn tool-call cap for this session.
+      //   /budget <N>    set the cap to N (positive integer)
+      //   /budget        show the current effective cap
+      if (parts.length > 0 && parts[0].toLowerCase() === "/budget") {
+        process.stdout.write("\n");
+        const budgetArg = parts[1] ?? "";
+        const effectiveCap =
+          state.maxToolIterations ??
+          envInt("SLASK_MAX_TOOL_ITERATIONS", MAX_TOOL_ITERATIONS);
+        if (budgetArg === "") {
+          console.log(
+            color("green", `  current per-turn tool cap: ${effectiveCap}`)
+          );
+          return loop();
+        }
+        const n = Number.parseInt(budgetArg, 10);
+        if (!Number.isInteger(n) || n < 1) {
+          console.log(
+            color(
+              "yellow",
+              `  budget must be a positive integer, got "${budgetArg}" — cap unchanged (${effectiveCap}).`
+            )
+          );
+          return loop();
+        }
+        state.maxToolIterations = n;
+        console.log(color("green", `  per-turn tool cap set to ${n}.`));
         return loop();
       }
       // /ralph — manage Ralph runs. `plan` hands a drafting prompt to the model.
