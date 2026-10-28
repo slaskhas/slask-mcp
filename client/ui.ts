@@ -25,6 +25,7 @@ import {
   MAX_TOOL_ITERATIONS,
   mcpToolsToOpenai,
   runAgentTurn,
+  stripReasoning,
 } from "./agent.js";
 import { listModelSelections, resolveModel } from "./models.js";
 import type {
@@ -649,7 +650,8 @@ export async function summarizeHistory(
       ],
     });
     const content = res?.choices?.[0]?.message?.content;
-    return content ? content.trim() : null;
+    const text = content ? stripReasoning(content) : "";
+    return text || null;
   } catch {
     // Network / auth / token-limit / malformed response: never mutate the
     // caller's history on failure.

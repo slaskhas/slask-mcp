@@ -194,6 +194,15 @@ export function mcpToolsToOpenai(mcpTools: McpToolLike[]): OpenAiFunctionTool[] 
 }
 
 /**
+ * Remove `<reasoning>…</reasoning>` blocks that some models (e.g. gpt-oss on
+ * Bedrock) emit inline in `content`. They show how the model thought, not the
+ * answer, so they are kept out of both the displayed reply and the history.
+ */
+export function stripReasoning(text: string): string {
+  return text.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "").trim();
+}
+
+/**
  * Run one user turn.
  *
  * @param cfg
@@ -273,7 +282,7 @@ export async function runAgentTurn(
       // and append its result; loop back for the model's next decision.
       messages.push({
         role: "assistant",
-        content: message.content ?? null,
+        content: message.content ? stripReasoning(message.content) || null : null,
         tool_calls: funcCalls,
       });
       for (const tc of funcCalls) {
@@ -322,14 +331,14 @@ export async function runAgentTurn(
     }
     if (unmet() && nudges < 2) {
       nudges++;
-      messages.push({ role: "assistant", content: message.content ?? "" });
+      messages.push({ role: "assistant", content: stripReasoning(message.content ?? "") });
       messages.push({
         role: "user",
         content: `You have not called ${required.join(" or ")} yet. Do not write more text: call it now.`,
       });
       continue;
     }
-    return message.content ?? "";
+    return stripReasoning(message.content ?? "");
   }
 
   throw new Error(

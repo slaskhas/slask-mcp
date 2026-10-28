@@ -233,5 +233,36 @@ const asyncThrown = async (f: () => Promise<unknown>): Promise<string> => {
   console.log("PASS test6 — per-turn tool budget is independent (resets each turn)");
 }
 
+// ---------------------------------------------------------------------------
+// 7. Inline <reasoning> blocks are not part of the answer or the history
+// ---------------------------------------------------------------------------
+{
+  const { calls, fn } = makeCaller();
+  const seen: any[][] = [];
+  const fake = makeFakeModel(
+    (n: number) => {
+      if (n === 1)
+        return choice(
+          {
+            content: "<reasoning>need a tool</reasoning>",
+            tool_calls: [toolCall("c1", "t", "{}")],
+          },
+          "tool_calls"
+        );
+      return choice(
+        { content: "<reasoning>Simple greeting.</reasoning>\nHello!" },
+        "stop"
+      );
+    },
+    (_n, msgs) => seen.push(msgs.map((m) => ({ ...m })))
+  );
+  const answer = await runAgentTurn(cfg(fake, fn), []);
+  assert(answer === "Hello!", `answer: ${JSON.stringify(answer)}`);
+  const assistant = seen[1].find((m) => m.role === "assistant");
+  assert(assistant.content === null, `history content: ${JSON.stringify(assistant.content)}`);
+  assert(calls.length === 1, "tool still ran");
+  console.log("PASS test7 — <reasoning> stripped from answer and history");
+}
+
 console.log("\nALL AGENT EDGES TESTS PASSED");
 process.exit(0);
