@@ -29,6 +29,16 @@
           }
         ]
       },
+      "bedrock": {
+        "baseUrl": "https://bedrock-runtime.us-west-2.amazonaws.com/openai",
+        "models": [
+          {
+            "id": "gpt-oss-120b",
+            "name": "openai.gpt-oss-120b-1:0",
+            "contextWindow": 131070
+          }
+        ]
+      },
       "real-openai": {
         "baseUrl": "https://api.openai.com",
         "models": [

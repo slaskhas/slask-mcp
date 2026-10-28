@@ -181,15 +181,15 @@ try {
     const d1 = await freshDir("t5a-prov-not-object");
     await writeModels(d1, '{"models": {"providers": {"p": []}}}');
     await expectThrow(() => loadModelsFile(d1), ['provider "p" must be an object']);
-    const d2 = await freshDir("t5b-empty-models");
+    const d2 = await freshDir("t5b-models-not-array");
     await writeModels(
       d2,
-      '{"models": {"providers": {"p": {"models": []}}}}',
+      '{"models": {"providers": {"p": {"models": {}}}}}',
     );
     await expectThrow(() => loadModelsFile(d2), [
-      'provider "p" must have a non-empty "models" array',
+      'provider "p" has a "models" that is not an array',
     ]);
-    console.log("PASS test5 — provider must be object with non-empty models array");
+    console.log("PASS test5 — provider must be object with an array of models");
   }
 
   // ---- Test 6: saveModelsFile round-trip ---------------------------------------
@@ -539,6 +539,21 @@ try {
     const r = await resolveModel(d, {});
     assert(r.providerId === "first" && r.id === "x", `first provider's first model: ${r.providerId}/${r.id}`);
     console.log("PASS test21 — no selection -> first provider's first model (insertion order)");
+  }
+
+  // ---- Test 21b: placeholder providers with no models are allowed and skipped ----------
+  {
+    const d = await freshDir("t21b-placeholder");
+    await writeModels(
+      d,
+      JSON.stringify({
+        models: { providers: { empty: { baseUrl: "http://h" }, blank: { models: [] },
+          real: { models: [{ id: "z", name: "z-model" }] } } },
+      }),
+    );
+    const r = await resolveModel(d, {});
+    assert(r.providerId === "real" && r.id === "z", `skips empty providers: ${r.providerId}/${r.id}`);
+    console.log("PASS test21b — providers with no models are placeholders, skipped by default selection");
   }
 
   // ---- Test 22: base precedence — provider baseUrl beats everything -------------------

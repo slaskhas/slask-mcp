@@ -298,10 +298,11 @@ function validateProvider(name: string, p: unknown): ProviderDef {
     provider.apiKey = k;
   }
   const modelsRaw = o.models;
-  if (!modelsRaw || !Array.isArray(modelsRaw) || modelsRaw.length === 0) {
-    throw new Error(
-      `models.json: provider "${name}" must have a non-empty "models" array`,
-    );
+  // A provider may have no models (placeholder awaiting models); it is skipped
+  // by selection until some are added.
+  if (modelsRaw === undefined) return provider;
+  if (!Array.isArray(modelsRaw)) {
+    throw new Error(`models.json: provider "${name}" has a "models" that is not an array`);
   }
   const seen = new Set<string>();
   for (let i = 0; i < modelsRaw.length; i++) {
@@ -446,8 +447,8 @@ export async function resolveModel(
   const raw = opts.selection ? String(opts.selection).trim() : null;
 
   if (raw === null) {
-    // No selection: first provider, first model (JSON insertion order).
-    const [pid, provider] = Object.entries(providers)[0]!;
+    // No selection: first provider that has models, first model (JSON insertion order).
+    const [pid, provider] = Object.entries(providers).find(([, d]) => d.models.length > 0)!;
     return finishResolve(pid, provider, provider.models[0]!, opts);
   }
 

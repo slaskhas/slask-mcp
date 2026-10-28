@@ -210,7 +210,8 @@ Selection and precedence:
 - `--model`/`-m` (and the Ralph role flags / `schedule add --model`) take a models.json
   **selection** — `provider/id`, or a bare id when unambiguous. Unknown selections fail
   immediately with an error listing the available `provider/id` entries. With no
-  selection, the first provider's first model is used.
+  selection, the first model of the first provider that has any is used. A provider
+  with no `models` (or `"models": []`) is a valid placeholder to fill in later.
 - Endpoint: the provider's `baseUrl` wins, else `--base-url`, else `API_BASE`, else
   `https://api.openai.com` (all normalized to `/v1`).
 - API key: the provider's `apiKey` wins, else `OPENAI_API_KEY`, else a `"local"`
@@ -219,6 +220,17 @@ Selection and precedence:
   `MAX_CONTEXT_TOKENS`, the run's `contextTokens` setting, else 32000.
 - Output cap (raw agent loop): a valid `SLASK_MAX_TOKENS` knob wins, clamped to ≤ the
   model's `maxTokens`; else the model's `maxTokens`; else 1024.
+
+### AWS Bedrock
+
+Bedrock's OpenAI-compatible endpoint works with no code changes, so models served there
+(e.g. `openai.gpt-oss-120b-1:0`) can be used directly. Add a provider like the `bedrock`
+entry in `models.example.json`, with `baseUrl` set to
+`https://bedrock-runtime.<region>.amazonaws.com/openai` (the client appends `/v1`). Put
+a Bedrock API key in `OPENAI_API_KEY` (in `.env`) and leave the provider's `apiKey` out,
+then select it with `--model bedrock/gpt-oss-120b` or `/model bedrock/gpt-oss-120b`. The
+model must be enabled in that region, and it must support tool calling for MCP tools to
+work. Models that need the native Converse API are not supported.
 
 Per-task selection: top-level `--model` is the default for the Ralph roles, which can
 each be overridden (`--worker-model`, `--checker-model`, `--splitter-model`,
