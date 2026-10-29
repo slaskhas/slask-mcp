@@ -11,7 +11,7 @@
 // REPL commands: /help /h  /tools /t  /skills /s  /reset /clear /c  /compact /summarize  /budget  /schedule add|list|rm  /ralph  /quit /exit /q
 
 import { createInterface } from "node:readline";
-import type { Writable } from "node:stream";
+import { Writable } from "node:stream";
 
 import { OpenAI } from "openai";
 import { printTools } from "./client.js";
@@ -179,6 +179,7 @@ const REPLY_HELP = [
   "  /compact  summarize the conversation so far, reclaiming context",
   "  /model    switch the active model to a catalog model (/model <provider/id>; bare /model lists them)",
   "  /budget set the per-turn tool cap (/budget <N>; bare shows the current cap)",
+  "  /verbose show or hide the tool-call trace (/verbose on|off; bare shows the state)",
   "  /schedule manage scheduled jobs (add/list/rm)",
   "  /ralph    plan/run autonomous Ralph loops (coding or research); /ralph alone for help",
   "  /quit     (or /exit, /q, or Ctrl+C) leave the REPL",
@@ -291,7 +292,7 @@ export function parseScheduleCmd(line: string): ScheduleParse | null {
 // ---------------------------------------------------------------------------
 const SLASH_COMMANDS = [
   "help", "tools", "skills", "reset", "clear",
-  "compact", "summarize", "model", "budget", "schedule", "ralph",
+  "compact", "summarize", "model", "budget", "verbose", "schedule", "ralph",
   "quit", "exit",
 ];
 // Kept in sync with parseScheduleCmd (below) and the /schedule help text.
@@ -366,6 +367,8 @@ export interface ChatState {
    * / default.
    */
   maxToolIterations?: number;
+  /** Show the `▸ tool(args)` trace during a turn; `/verbose off` sets false. Default (undefined) = shown. */
+  showTools?: boolean;
   baseDir: string;
 }
 
@@ -511,6 +514,7 @@ export async function runTurn(
   prompt: string,
   history: ConversationMessage[],
   spinner: Spinner,
+  opts: { answerOnly?: boolean } = {},
 ): Promise<string | null> {
   const { openai, openaiTools, skills, model, baseDir } = state;
   const systemPrompt =
@@ -576,7 +580,7 @@ export async function runTurn(
         maxIterations: state.maxToolIterations,
       },
       history,
-      onToolCall
+      opts.answerOnly || state.showTools === false ? undefined : onToolCall
     );
     spinner.stopDown();
     history.push({ role: "assistant", content: answer });
@@ -585,9 +589,9 @@ export async function runTurn(
     spinner.stop();
     // Drop the unprocessed request so a failed turn doesn't pollute history.
     if (history[history.length - 1] === userMsg) history.pop();
-    console.log(
-      color("red", `${err instanceof Error ? err.message : String(err)}\n`)
-    );
+    const msg = color("red", `${err instanceof Error ? err.message : String(err)}\n`);
+    if (opts.answerOnly) console.error(msg);
+    else console.log(msg);
     return null;
   }
 }
@@ -937,6 +941,18 @@ export async function startChat({
         printBanner(state, true);
         return loop();
       }
+      // /verbose — show or hide the `▸ tool(args)` trace (answers only when off).
+      if (parts.length > 0 && parts[0].toLowerCase() === "/verbose") {
+        process.stdout.write("\n");
+        const arg = (parts[1] ?? "").toLowerCase();
+        if (arg === "on" || arg === "off") state.showTools = arg === "on";
+        else if (arg !== "") {
+          console.log(color("yellow", `  usage: /verbose on|off (now ${state.showTools === false ? "off" : "on"})`));
+          return loop();
+        }
+        console.log(color("green", `  tool trace is ${state.showTools === false ? "off — only answers are shown" : "on"}.`));
+        return loop();
+      }
       // /budget — set (or view) the per-turn tool-call cap for this session.
       //   /budget <N>    set the cap to N (positive integer)
       //   /budget        show the current effective cap
@@ -1034,6 +1050,7 @@ export async function runOneShot({
   prompt,
   openai,
   quiet,
+  answerOnly,
 }: {
   registry: Registry;
   model: string;
@@ -1047,20 +1064,27 @@ export async function runOneShot({
   // scheduler daemon's one-shot children so their logs show just prompt +
   // answer.
   quiet?: boolean;
+  // Print only the final answer on stdout (no banner, prompt echo, tool trace
+  // or spinner); errors go to stderr. For scripts: `slask-client -p … -a`.
+  answerOnly?: boolean;
 }): Promise<number> {
   const state = await buildChatState({ registry, model, base, apiKey, maxTokens, selection, openai });
-  if (!quiet) {
+  if (!quiet && !answerOnly) {
     printBanner(state, false);
   }
-  console.log(color("dim", "\nprompt: "));
-  console.log(color("dim", `  ${prompt}\n`));
-  const spinner = new Spinner();
+  if (!answerOnly) {
+    console.log(color("dim", "\nprompt: "));
+    console.log(color("dim", `  ${prompt}\n`));
+  }
+  // A Writable that is not a TTY keeps the spinner silent.
+  const spinner = answerOnly ? new Spinner(new Writable({ write: (_c, _e, cb) => cb() })) : new Spinner();
   const history: ConversationMessage[] = [];
-  const answer = await runTurn(state, prompt, history, spinner);
+  const answer = await runTurn(state, prompt, history, spinner, { answerOnly });
   await closeAll(state.registry);
   if (answer === null) {
     return 1;
   }
-  console.log(color("blue", `  ${answer ? answer : "(no response)"}`));
+  if (answerOnly) console.log(answer);
+  else console.log(color("blue", `  ${answer ? answer : "(no response)"}`));
   return 0;
 }
