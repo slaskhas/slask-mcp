@@ -184,6 +184,9 @@ Options:
                          and exit (instead of the interactive REPL).
   -q, --quiet            Omit the startup banner with --prompt (daemon-fired
                          one-shot runs show prompt + answer only)
+  -a, --answer-only      With --prompt: print ONLY the final answer on stdout
+                         (no banner, prompt echo, tool trace, server warnings or
+                         MCP server stderr); errors go to stderr, exit code 1
   -b, --base-url <url>   OpenAI-compatible base URL (chat; overrides API_BASE)
   Env vars (a .env file in the current dir is read on startup; shell values
              win): SLASK_MCP_URL, SLASK_MCP_TOKEN (default server);
@@ -243,6 +246,7 @@ interface CliConfig {
   args: Record<string, unknown>;
   prompt: string | null;
   quiet: boolean;
+  answerOnly: boolean;
   help: boolean;
   dir: string | null;
   ralph: {
@@ -489,6 +493,7 @@ export function parse(argv: string[]): CliConfig {
     args: {},
     prompt: null,
     quiet: false,
+    answerOnly: false,
     help: false,
     dir: null,
     ralph: {},
@@ -532,6 +537,8 @@ export function parse(argv: string[]): CliConfig {
       if (++i < argv.length) config.prompt = argv[i];
     } else if (f === "--quiet" || f === "-q") {
       config.quiet = true;
+    } else if (f === "--answer-only" || f === "-a") {
+      config.answerOnly = true;
     } else if (f === "--dir" || f === "-C") {
       if (++i < argv.length) config.dir = argv[i];
     } else if (f === "--mode") {
@@ -713,7 +720,7 @@ async function main(): Promise<void> {
       ? null
       : ({ name: "slask", kind: "http", url: config.url, token: config.token } as HttpSpec);
     const specs = buildSpecs({ defaultSpec, configServers });
-    registry = await connectAllServers(specs);
+    registry = await connectAllServers(specs, config.answerOnly ? { defaultStderr: "ignore" } : {});
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     fail(`config error: ${msg}`);
@@ -723,16 +730,21 @@ async function main(): Promise<void> {
   // No reachable MCP server is *not* fatal: the built-in file/schedule tools
   // and local skills stay fully usable, so the client always starts. Per-server
   // warnings are shown here (once) for every command — chat, one-shot, list, call.
-  if (registry.views.length === 0 && registry.warnings.length === 0) {
+  const warn = !(config.answerOnly && config.prompt);
+  if (warn && registry.views.length === 0 && registry.warnings.length === 0) {
     console.error(
       "⚠ no MCP servers configured — using only built-in tools and local skills."
     );
   }
-  for (const w of registry.warnings) {
+  for (const w of warn ? registry.warnings : []) {
     console.error(`⚠ could not reach server ${w.name}: ${w.error}${hintFor(w.error)}`);
   }
 
   if (!sub || sub === "chat") {
+    if (config.answerOnly && !config.prompt) {
+      fail("--answer-only needs --prompt (it is for one-shot runs, not the interactive REPL)");
+      return;
+    }
     const topModel = await resolveModel(process.cwd(), {
       selection: config.model ?? null,
       baseOverride: config.base ?? null,
@@ -756,6 +768,7 @@ async function main(): Promise<void> {
         selection: topModel.selection,
         prompt: config.prompt,
         quiet: config.quiet,
+        answerOnly: config.answerOnly,
       });
       process.exit(code);
     } else {

@@ -978,6 +978,9 @@ async function main(): Promise<void> {
     assert.equal(parseRalphCmd("/ralph reopen pr")?.kind, "error");
     assert.equal(parseRalphCmd("/ralph report")?.kind, "error");
     assert.equal(parse(["ralph", "add", "pr", "t", "--desc", "d"]).ralph.desc, "d");
+    assert.equal(parse(["-p", "x", "--answer-only"]).answerOnly, true);
+    assert.equal(parse(["-p", "x", "-a"]).answerOnly, true);
+    assert.equal(parse(["-p", "x"]).answerOnly, false);
     assert.equal(parse(["ralph", "reopen", "pr", "T1", "--note", "why"]).ralph.note, "why");
     console.log("PASS test22 — add/reopen a task on a finished research run redoes only it + the report; ralph report");
     await rm(base, { recursive: true, force: true });

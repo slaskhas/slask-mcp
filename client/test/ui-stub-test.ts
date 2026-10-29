@@ -273,6 +273,44 @@ try {
     console.log("PASS test3 — runOneShot success -> 0 + answer printed");
   }
 
+  // ---- Test 3b: runOneShot --answer-only: stdout is exactly the answer -------
+  {
+    const { registry } = makeRegistry([mkTool("echo")]);
+    const out = captureStdout();
+    const fake = makeFakeModel((n) => {
+      if (n === 1)
+        return choice({ tool_calls: [toolCall("c1", "echo", JSON.stringify({ message: "hi" }))] }, "tool_calls");
+      if (n === 2) return choice({ content: "Hello, hi." }, "stop");
+      throw new Error(`unexpected round ${n}`);
+    }) as FakeOpenAI;
+    const code = await runOneShot({ registry, model: "test-model", base: null, prompt: "say hi", openai: fake, answerOnly: true });
+    const stdout = out.text();
+    out.stop();
+    assert(code === 0, `exit code: ${code}`);
+    assert(stdout === "Hello, hi.\n", `stdout must be only the answer: ${JSON.stringify(stdout)}`);
+    console.log("PASS test3b — runOneShot answerOnly -> stdout is exactly the answer (no prompt, no tool trace)");
+  }
+
+  // ---- Test 3c: state.showTools=false hides the tool trace in runTurn ------
+  {
+    for (const show of [true, false]) {
+      const { registry } = makeRegistry([mkTool("echo")]);
+      const fake = makeFakeModel((n) => {
+        if (n === 1) return choice({ tool_calls: [toolCall("c1", "echo", JSON.stringify({ message: "hi" }))] }, "tool_calls");
+        return choice({ content: "done" }, "stop");
+      }) as FakeOpenAI;
+      const state = makeState([mkTool("echo")], registry, fake);
+      state.showTools = show;
+      const out = captureStdout();
+      const answer = await runTurn(state, "go", [], new Spinner());
+      const stdout = out.text();
+      out.stop();
+      assert(answer === "done", `answer: ${answer}`);
+      assert(stdout.includes("▸ echo") === show, `trace ${show ? "missing" : "present"}: ${JSON.stringify(stdout)}`);
+    }
+    console.log("PASS test3c — showTools=false hides the ▸ tool trace; the answer is still returned");
+  }
+
   // ---- Test 4: runOneShot failure (exit 1, error printed) ------------------
   {
     const { registry } = makeRegistry([mkTool("echo")]);
@@ -527,7 +565,7 @@ try {
 
     const allTop = [
       "help", "tools", "skills", "reset", "clear",
-      "compact", "summarize", "model", "budget", "schedule", "ralph",
+      "compact", "summarize", "model", "budget", "verbose", "schedule", "ralph",
       "quit", "exit",
     ];
     const scheduleSubs = ["add", "list", "rm"];

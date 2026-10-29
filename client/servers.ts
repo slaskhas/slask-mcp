@@ -207,10 +207,18 @@ async function connectSpec(spec: ServerSpec): Promise<{ client: Client; tools: T
  * warning and the server skipped, so one dead server never sinks the rest.
  * Returns `{ views, warnings, keyedViews, byKey }`.
  */
-export async function connectAllServers(specs: ServerSpec[]): Promise<Registry> {
+export async function connectAllServers(
+  specs: ServerSpec[],
+  opts: { defaultStderr?: "inherit" | "pipe" | "ignore" | "overlapped" } = {},
+): Promise<Registry> {
   const views: ServerView[] = [];
   const warnings: Warning[] = [];
-  for (const spec of specs) {
+  for (const raw of specs) {
+    // `defaultStderr` applies only where the spec does not choose for itself.
+    const spec: ServerSpec =
+      raw.kind === "stdio" && raw.stderr === undefined && opts.defaultStderr
+        ? { ...raw, stderr: opts.defaultStderr }
+        : raw;
     try {
       const { client, tools } = await connectSpec(spec);
       const view: ServerView = {
