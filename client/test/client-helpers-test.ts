@@ -113,6 +113,7 @@ import type { CallToolResult } from "../types.js";
 {
   const savedKey = process.env.OPENAI_API_KEY;
   const savedBase = process.env.API_BASE;
+  const savedBedrock = process.env.AWS_BEARER_TOKEN_BEDROCK;
   try {
     // real OpenAI endpoint, no key -> throw
     process.env.OPENAI_API_KEY = "";
@@ -130,6 +131,15 @@ import type { CallToolResult } from "../types.js";
       `baseURL: ${withKey.baseURL}`
     );
 
+    // Bedrock endpoint: AWS_BEARER_TOKEN_BEDROCK only (not OPENAI_API_KEY); a provider key beats both
+    const bedrock = "https://bedrock-runtime.us-west-2.amazonaws.com/openai";
+    process.env.AWS_BEARER_TOKEN_BEDROCK = "bedrock-token";
+    assert(createOpenAiClient({ base: bedrock }).apiKey === "bedrock-token", "bedrock token used");
+    assert(createOpenAiClient({ base: bedrock, apiKey: "prov" }).apiKey === "prov", "provider key wins");
+    assert(createOpenAiClient({ base: "https://api.openai.com" }).apiKey === "real-key", "bedrock token ignored off-Bedrock");
+    delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+    assert.throws(() => createOpenAiClient({ base: bedrock }), /AWS_BEARER_TOKEN_BEDROCK/); // never OPENAI_API_KEY
+
     // local / compatible base, no key -> ok (placeholder key), /v1 normalized
     delete process.env.OPENAI_API_KEY;
     assert(createOpenAiClient({ base: "http://localhost:11434" }), "local base no key ok");
@@ -146,6 +156,8 @@ import type { CallToolResult } from "../types.js";
     else process.env.OPENAI_API_KEY = savedKey;
     if (savedBase === undefined) delete process.env.API_BASE;
     else process.env.API_BASE = savedBase;
+    if (savedBedrock === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+    else process.env.AWS_BEARER_TOKEN_BEDROCK = savedBedrock;
   }
   console.log("PASS test5 — createOpenAiClient (key policy + /v1 normalization)");
 }

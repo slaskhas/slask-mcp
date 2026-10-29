@@ -132,6 +132,15 @@ export const SYSTEM_PROMPT = [
   "clearly and continue with what you can (do not pretend the tool succeeded).",
 ].join("\n");
 
+// True for AWS Bedrock runtime endpoints (bedrock-runtime.<region>.amazonaws.com).
+function isBedrock(base: string): boolean {
+  try {
+    return /^bedrock-runtime[.-][^/]*\.amazonaws\.com(\.cn)?$/i.test(new URL(base).hostname);
+  } catch {
+    return false;
+  }
+}
+
 // Resolve the OpenAI client config from env + the (optional) base-url flag.
 //
 // A local OpenAI-compatible server (e.g. Ollama at http://host:11434) needs
@@ -146,7 +155,20 @@ function resolveApiConfig({
   apiKey: string;
 } {
   const rawBase = base ?? process.env.API_BASE ?? DEFAULT_API_BASE;
-  const key = (apiKey ?? process.env.OPENAI_API_KEY ?? "").trim();
+  // Bedrock endpoints use AWS_BEARER_TOKEN_BEDROCK only (never OPENAI_API_KEY, so an
+  // OpenAI key is not sent to AWS); every other endpoint uses OPENAI_API_KEY.
+  const bedrock = isBedrock(rawBase);
+  const key = (
+    apiKey ??
+    (bedrock ? process.env.AWS_BEARER_TOKEN_BEDROCK : process.env.OPENAI_API_KEY) ??
+    ""
+  ).trim();
+  if (bedrock && !key) {
+    throw new Error(
+      "the target is AWS Bedrock but no API key is set. Set AWS_BEARER_TOKEN_BEDROCK " +
+        '(or a provider "apiKey" in models.json).'
+    );
+  }
   const real = isRealOpenAi(rawBase);
   const effectiveKey = key || (real ? "" : "local");
   if (!effectiveKey) {

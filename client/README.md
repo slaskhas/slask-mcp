@@ -227,7 +227,8 @@ Bedrock's OpenAI-compatible endpoint works with no code changes, so models serve
 (e.g. `openai.gpt-oss-120b-1:0`) can be used directly. Add a provider like the `bedrock`
 entry in `models.example.json`, with `baseUrl` set to
 `https://bedrock-runtime.<region>.amazonaws.com/openai` (the client appends `/v1`). Put
-a Bedrock API key in `OPENAI_API_KEY` (in `.env`) and leave the provider's `apiKey` out,
+a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK` (in `.env`; it is used for Bedrock
+endpoints, while `OPENAI_API_KEY` is used for all others) and leave the provider's `apiKey` out,
 then select it with `--model bedrock/gpt-oss-120b` or `/model bedrock/gpt-oss-120b`. The
 model must be enabled in that region, and it must support tool calling for MCP tools to
 work. Models that need the native Converse API are not supported.
