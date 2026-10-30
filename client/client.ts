@@ -14,11 +14,13 @@
 import {
   Client,
   StreamableHTTPClientTransport,
+  UnauthorizedError,
   type CallToolResult,
   type StreamableHTTPClientTransportOptions,
   type Tool,
 } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { openBrowser, waitForCallback, type FileOAuthProvider } from "./oauth.js";
 import type { ServerView, StdioSpec } from "./types.js";
 
 const CLIENT_INFO = { name: "slask-mcp-client", version: "0.1.0" };
@@ -31,10 +33,14 @@ const CLIENT_INFO = { name: "slask-mcp-client", version: "0.1.0" };
 export async function connect({
   url,
   token,
+  oauth,
 }: {
   url: string;
   token?: string | null;
+  oauth?: FileOAuthProvider | null;
 }): Promise<Client> {
+  if (oauth) return connectOAuth(url, oauth);
+
   const transportOptions: StreamableHTTPClientTransportOptions | undefined =
     token
       ? {
@@ -48,6 +54,41 @@ export async function connect({
   const client = new Client(CLIENT_INFO);
   await client.connect(transport);
   return client;
+}
+
+/**
+ * Connect to an OAuth-protected server. Saved tokens are used (and refreshed)
+ * transparently; when none are usable the SDK asks the provider to redirect, at
+ * which point we open the browser, wait for the loopback callback, exchange the
+ * code, and reconnect on a fresh transport.
+ */
+async function connectOAuth(url: string, oauth: FileOAuthProvider): Promise<Client> {
+  const attempt = async () => {
+    const transport = new StreamableHTTPClientTransport(new URL(url), { authProvider: oauth });
+    const client = new Client(CLIENT_INFO);
+    try {
+      await client.connect(transport);
+      return { client, transport, error: null };
+    } catch (error) {
+      await client.close().catch(() => {});
+      return { client, transport, error };
+    }
+  };
+
+  const first = await attempt();
+  if (!first.error) return first.client;
+  if (!UnauthorizedError.isInstance(first.error) || !oauth.authorizationUrl) throw first.error;
+
+  const authUrl = oauth.authorizationUrl.toString();
+  const callback = waitForCallback(oauth);
+  await callback.ready;
+  console.error(`Sign-in required for ${url}\nOpening your browser; if nothing opens, visit:\n  ${authUrl}`);
+  openBrowser(authUrl);
+  await first.transport.finishAuth(await callback.params);
+
+  const second = await attempt();
+  if (second.error) throw second.error;
+  return second.client;
 }
 
 /**

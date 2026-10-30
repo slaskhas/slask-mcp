@@ -19,6 +19,11 @@ export interface HttpSpec {
   kind: "http";
   url: string;
   token: string | null;
+  /**
+   * OAuth 2.1 sign-in (authorization code + PKCE, dynamic client registration).
+   * Mutually exclusive with `token`. Present = OAuth enabled.
+   */
+  oauth?: { callbackPort?: number; scope?: string };
 }
 
 /** A stdio (spawned-process) server. */

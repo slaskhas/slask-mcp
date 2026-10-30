@@ -13,6 +13,12 @@
       "type": "http",
       "url": "http://127.0.0.1:9001/mcp",
       "token": "secret"
+    },
+    {
+      "name": "jira",
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v2/mcp",
+      "oauth": true
     }
   ]
 }

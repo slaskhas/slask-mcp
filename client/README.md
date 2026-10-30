@@ -121,6 +121,7 @@ started:
 | `type`         | http or stdio  | http or stdio   | connection kind                                                   |
 | `url`          | required (http)| ignored         | full endpoint including `/mcp`                                    |
 | `token`        | optional (http)| ignored         | bearer token; sent as `Authorization: Bearer ...`                 |
+| `oauth`        | optional (http)| ignored         | `true` or `{ "callbackPort": 8976, "scope": "..." }`; browser sign-in (see below). Not combinable with `token` |
 | `command`      | ignored        | required (stdio)| executable path to run as the server process                      |
 | `args`         | ignored        | optional (stdio)| command-line arguments passed to the process                      |
 | `env`          | ignored        | optional (stdio)| extra environment variables for the process                       |
@@ -128,6 +129,23 @@ started:
 | `stderr`       | ignored        | optional (stdio)| child stderr: `"inherit"`, `"pipe"`, `"ignore"`, or `"overlapped"` (default: `"inherit"`; mirrors Node `spawn` `stdio`) |
 | `maxBufferSize`| ignored        | optional (stdio)| max bytes of buffered stdio output per read (default: 10 MiB)     |
 
+
+**OAuth servers (e.g. Atlassian Jira).** Set `"oauth": true` instead of a token and the
+client does the full OAuth 2.1 flow (discovery, dynamic client registration, PKCE,
+audience-bound token, refresh):
+
+```json
+{ "name": "jira", "type": "http", "url": "https://mcp.atlassian.com/v2/mcp", "oauth": true }
+```
+
+The first connect opens your browser for sign-in and consent (the URL is also printed on
+stderr), then receives the redirect on `http://localhost:8976/callback` (change with
+`oauth.callbackPort`; the port is part of the registered redirect URI, so keep it stable).
+The registered client and tokens are stored per server in
+`~/.slask-mcp-client/oauth/<name>.json` (mode 0600); later runs reuse and refresh them
+without a browser. Delete that file to sign out. If sign-in isn't completed within 5
+minutes the server is skipped with a warning, like any other connect failure. Tool calls
+run with your own Jira permissions.
 
 **Tool naming and collisions.** Every tool from every connected server is listed once in the
 OpenAI function-calling `tools` array. A tool whose name is unique across all connected
