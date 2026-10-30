@@ -12,6 +12,7 @@ import {
   openAiTools,
   resolveTool,
 } from "../servers.js";
+import { FileOAuthProvider, waitForCallback } from "../oauth.js";
 import type {
   CallToolResult,
   Client,
@@ -308,6 +309,77 @@ const registry = makeRegistry([weather, calendar]);
   const m = await thrown(() => callToolBy("ghost", registry, {}));
   assert(/tool "ghost" not found/.test(m), m);
   console.log("PASS test9 — callToolBy routes + unknown throws");
+}
+
+// ---- 10. oauth config: true / object / conflicts / bad values ----------------
+{
+  const file = await writeFileIn(
+    "oauth.json",
+    JSON.stringify({
+      servers: [
+        { name: "jira", type: "http", url: "https://mcp.atlassian.com/v2/mcp", oauth: true },
+        {
+          name: "other",
+          type: "http",
+          url: "https://example.com/mcp",
+          oauth: { callbackPort: 9999, scope: "read" },
+        },
+      ],
+    }),
+  );
+  const specs = (await loadConfigServers({ flag: file })) as HttpSpec[];
+  assert(specs[0].token === null && specs[0].oauth !== undefined, "oauth:true not enabled");
+  assert(specs[1].oauth?.callbackPort === 9999 && specs[1].oauth?.scope === "read", "oauth opts");
+
+  const both = await writeFileIn(
+    "oauth-both.json",
+    JSON.stringify({ servers: [{ name: "j", type: "http", url: "http://x/mcp", token: "t", oauth: true }] }),
+  );
+  assert(/both "token" and "oauth"/.test(await thrown(() => loadConfigServers({ flag: both }))));
+
+  const badPort = await writeFileIn(
+    "oauth-port.json",
+    JSON.stringify({ servers: [{ name: "j", type: "http", url: "http://x/mcp", oauth: { callbackPort: 0 } }] }),
+  );
+  assert(/callbackPort/.test(await thrown(() => loadConfigServers({ flag: badPort }))));
+  console.log("PASS test10 — oauth config validation");
+}
+
+// ---- 11. FileOAuthProvider persistence + callback listener --------------------
+{
+  const dir = join(root, "oauth-store");
+  const provider = new FileOAuthProvider({ serverName: "jira", callbackPort: 18976, dir });
+  assert(provider.redirectUrl === "http://localhost:18976/callback", provider.redirectUrl);
+  assert((await provider.tokens()) === undefined, "tokens before save");
+  await provider.saveTokens({ access_token: "a", token_type: "Bearer", refresh_token: "r" });
+  await provider.saveCodeVerifier("v");
+  const again = new FileOAuthProvider({ serverName: "jira", callbackPort: 18976, dir });
+  assert((await again.tokens())?.access_token === "a", "tokens persist across instances");
+  assert((await again.codeVerifier()) === "v", "verifier persists");
+  await again.invalidateCredentials("tokens");
+  assert((await provider.tokens()) === undefined, "tokens invalidated");
+  assert((await provider.codeVerifier()) === "v", "verifier kept");
+
+  // good callback
+  const state = provider.state();
+  const ok = waitForCallback(provider, 5000);
+  await ok.ready;
+  const res = await fetch(`http://127.0.0.1:18976/callback?code=abc&state=${state}`);
+  assert(res.status === 200, `status ${res.status}`);
+  assert((await ok.params).get("code") === "abc", "code returned");
+
+  // state mismatch is rejected
+  provider.state();
+  const bad = waitForCallback(provider, 5000);
+  await bad.ready;
+  const r2 = await fetch("http://127.0.0.1:18976/callback?code=abc&state=forged");
+  assert(r2.status === 400, `forged status ${r2.status}`);
+  assert(/state mismatch/.test(await thrown(() => bad.params)), "forged state rejected");
+
+  // timeout
+  const slow = waitForCallback(provider, 50);
+  assert(/timed out/.test(await thrown(() => slow.params)), "timeout");
+  console.log("PASS test11 — provider persistence + loopback callback");
 }
 
 await rm(root, { recursive: true, force: true });

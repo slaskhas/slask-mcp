@@ -17,6 +17,7 @@
 import fs from "node:fs/promises";
 import { join } from "node:path";
 
+import { FileOAuthProvider } from "./oauth.js";
 import { close, connect, connectStdio, listTools } from "./client.js";
 import type {
   CallToolResult,
@@ -109,6 +110,7 @@ function validateServer(s: unknown, i: number): ServerSpec {
     type,
     url,
     token,
+    oauth,
     command,
     args,
     env,
@@ -131,11 +133,36 @@ function validateServer(s: unknown, i: number): ServerSpec {
     } catch {
       throw new Error(`servers[${i}].url is not a valid URL: ${url}`);
     }
+    const bearer = typeof token === "string" && token !== "" ? token : null;
+    if (oauth === undefined || oauth === false) {
+      return { name, kind: "http", url, token: bearer };
+    }
+    if (bearer) {
+      throw new Error(`servers[${i}] cannot set both "token" and "oauth"`);
+    }
+    const o = oauth === true ? {} : oauth;
+    if (!o || typeof o !== "object" || Array.isArray(o)) {
+      throw new Error(`servers[${i}].oauth must be true or an object`);
+    }
+    const { callbackPort, scope } = o as Record<string, unknown>;
+    if (
+      callbackPort !== undefined &&
+      (typeof callbackPort !== "number" ||
+        !Number.isInteger(callbackPort) ||
+        callbackPort < 1 ||
+        callbackPort > 65535)
+    ) {
+      throw new Error(`servers[${i}].oauth.callbackPort must be a port number`);
+    }
+    if (scope !== undefined && typeof scope !== "string") {
+      throw new Error(`servers[${i}].oauth.scope must be a string`);
+    }
     return {
       name,
       kind: "http",
       url,
-      token: typeof token === "string" && token !== "" ? token : null,
+      token: null,
+      oauth: { callbackPort: callbackPort as number | undefined, scope: scope as string | undefined },
     };
   } else if (type === "stdio") {
     if (!command || typeof command !== "string" || command.trim() === "") {
@@ -196,7 +223,13 @@ export function buildSpecs({
 async function connectSpec(spec: ServerSpec): Promise<{ client: Client; tools: Tool[] }> {
   const client =
     spec.kind === "http"
-      ? await connect({ url: spec.url, token: spec.token })
+      ? await connect({
+          url: spec.url,
+          token: spec.token,
+          oauth: spec.oauth
+            ? new FileOAuthProvider({ serverName: spec.name, ...spec.oauth })
+            : null,
+        })
       : await connectStdio(spec);
   const tools = await listTools(client);
   return { client, tools };
