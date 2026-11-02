@@ -382,6 +382,42 @@ const registry = makeRegistry([weather, calendar]);
   console.log("PASS test11 — provider persistence + loopback callback");
 }
 
+// ---- 12. ${VAR} expansion in config strings ------------------------------------
+{
+  process.env.SLASK_TEST_KEY = "s3cret";
+  delete process.env.SLASK_TEST_MISSING;
+  const file = await writeFileIn(
+    "env.json",
+    JSON.stringify({
+      servers: [
+        {
+          name: "c",
+          type: "stdio",
+          command: "docker",
+          args: ["-e", "KEY=${SLASK_TEST_KEY}", "lit=$${SLASK_TEST_KEY}"],
+          env: { K: "${SLASK_TEST_KEY}" },
+        },
+        { name: "h", type: "http", url: "http://x/mcp", token: "${SLASK_TEST_KEY}" },
+        { name: "off", type: "http", url: "http://x/mcp", disabled: true, token: "${SLASK_TEST_MISSING}" },
+      ],
+    }),
+  );
+  const specs = await loadConfigServers({ flag: file });
+  assert(specs.length === 2, "disabled server dropped without needing its vars");
+  const c = specs[0] as StdioSpec;
+  assert(c.args?.[1] === "KEY=s3cret" && c.args?.[2] === "lit=${SLASK_TEST_KEY}", `args ${c.args}`);
+  assert(c.env?.K === "s3cret", "env expanded");
+  assert((specs[1] as HttpSpec).token === "s3cret", "token expanded");
+
+  const missing = await writeFileIn(
+    "env-missing.json",
+    JSON.stringify({ servers: [{ name: "m", type: "stdio", command: "x", args: ["${SLASK_TEST_MISSING}"] }] }),
+  );
+  const m = await thrown(() => loadConfigServers({ flag: missing }));
+  assert(/servers\[0\]\.args\[0\].*SLASK_TEST_MISSING.*not set/.test(m), m);
+  console.log("PASS test12 — ${VAR} expansion");
+}
+
 await rm(root, { recursive: true, force: true });
 console.log("\nALL SERVERS TESTS PASSED");
 process.exit(0);

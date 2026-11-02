@@ -130,6 +130,12 @@ started:
 | `maxBufferSize`| ignored        | optional (stdio)| max bytes of buffered stdio output per read (default: 10 MiB)     |
 
 
+**Keeping secrets out of the file.** Any string in a server entry may contain `${VAR}`,
+which is replaced with that environment variable (from the shell or the `.env` file) when
+the config is loaded, e.g. `"-e", "CLOCKIFY_API_KEY=${CLOCKIFY_API_KEY}"` or
+`"token": "${CALENDAR_TOKEN}"`. An unset variable fails that server with an error naming
+it (a `disabled` server is not checked). Write `$${` for a literal `${`.
+
 **OAuth servers (e.g. Atlassian Jira).** Set `"oauth": true` instead of a token and the
 client does the full OAuth 2.1 flow (discovery, dynamic client registration, PKCE,
 audience-bound token, refresh):
