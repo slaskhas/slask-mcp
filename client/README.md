@@ -460,6 +460,15 @@ The tools never touch the parent directory, any upstream directory, or
 neighbouring folders — and since this check is in `src/files.ts`, no prompt
 engineering or model "good behaviour" can weaken it.
 
+## Saved session state
+
+The interactive chat remembers your last `/model` choice and `/verbose`
+setting between sessions in `.slask-state.json` (in the directory where the
+client is run, like `.env` / `mcp.json`; gitignored). On the next start the
+saved model is used unless you pass `--model`, and a saved model that is no
+longer in `models.json` falls back to the default with a warning. One-shot
+(`--prompt`) runs ignore saved state. Delete the file to reset.
+
 ## Scheduled jobs
 
 Run prompts on a schedule with a small daemon. `slask-client schedule` keeps

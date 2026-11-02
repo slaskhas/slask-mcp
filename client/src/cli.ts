@@ -65,6 +65,7 @@ import {
   loadConfigServers,
 } from "./servers.js";
 import { resolveModel } from "./models.js";
+import { loadState } from "./state.js";
 import {
   discoverSkills,
   executeScript,
@@ -745,7 +746,24 @@ async function main(): Promise<void> {
       fail("--answer-only needs --prompt (it is for one-shot runs, not the interactive REPL)");
       return;
     }
-    const topModel = await resolveModel(process.cwd(), {
+    // Interactive chat restores the last `/model` choice and `/verbose`
+    // setting from .slask-state.json; an explicit --model wins, and one-shot
+    // runs ignore saved state so scripted/scheduled output stays stable.
+    const interactive = !config.prompt;
+    const saved = interactive ? await loadState() : {};
+    let topModel;
+    if (config.model == null && saved.model !== undefined) {
+      try {
+        topModel = await resolveModel(process.cwd(), {
+          selection: saved.model,
+          baseOverride: config.base ?? null,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`⚠ saved model "${saved.model}" is unavailable (${msg}); using the default`);
+      }
+    }
+    topModel ??= await resolveModel(process.cwd(), {
       selection: config.model ?? null,
       baseOverride: config.base ?? null,
     });
@@ -779,6 +797,7 @@ async function main(): Promise<void> {
         apiKey: topModel.apiKey,
         maxTokens: topModel.maxTokens,
         selection: topModel.selection,
+        showTools: saved.showTools,
       });
     }
     return;
