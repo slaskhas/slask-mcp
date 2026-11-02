@@ -9,7 +9,7 @@ function-calling) or by hand (`list` / `call`).
 
 The client is a **TypeScript** Node.js ESM CLI (`"type": "module"`, Node v20+
 required) that talks to MCP servers over streamable HTTP or raw stdio. The
-source lives in `client/*.ts`; the runnable program is the compiled
+source lives in `client/src/*.ts`; the runnable program is the compiled
 `client/dist/` — so the build must be (re)done before running.
 
 ### Build
@@ -457,7 +457,7 @@ as model-actionable `ERROR calling …` feed-back:
   (including symlinked directories or symlinked parent paths for `write_file`).
 
 The tools never touch the parent directory, any upstream directory, or
-neighbouring folders — and since this check is in `files.ts`, no prompt
+neighbouring folders — and since this check is in `src/files.ts`, no prompt
 engineering or model "good behaviour" can weaken it.
 
 ## Scheduled jobs
