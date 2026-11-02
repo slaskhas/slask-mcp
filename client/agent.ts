@@ -29,7 +29,7 @@ export const DEFAULT_MODEL = "gpt-4o-mini"; // cheap/fast for real OpenAI; overr
 export const DEFAULT_API_BASE = "https://api.openai.com"; // normalize to /v1 below
 export const DEFAULT_CONTEXT_TOKENS = 32000; // model context window fallback; see models.json / MAX_CONTEXT_TOKENS
 export const MAX_TOOL_ITERATIONS = 12; // safety cap: default tool round-trips per turn
-const MAX_TOKENS = 1024; // hard cap on each completion
+const MAX_TOKENS = 32767; // hard cap on each completion
 
 // Both caps are overridable by env (read per turn). Ralph iterations set higher
 // values for their child processes — real coding turns need many tool rounds.

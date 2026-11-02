@@ -237,7 +237,7 @@ Selection and precedence:
 - Context window (Ralph): smallest of the model's `contextWindow`,
   `MAX_CONTEXT_TOKENS`, the run's `contextTokens` setting, else 32000.
 - Output cap (raw agent loop): a valid `SLASK_MAX_TOKENS` knob wins, clamped to ≤ the
-  model's `maxTokens`; else the model's `maxTokens`; else 1024.
+  model's `maxTokens`; else the model's `maxTokens`; else 32767.
 
 ### AWS Bedrock
 
