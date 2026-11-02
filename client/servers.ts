@@ -96,8 +96,35 @@ export async function loadConfigServers({
     if (s && typeof s === "object" && (s as Record<string, unknown>).disabled === true) {
       return [];
     }
-    return [validateServer(s, i)];
+    return [validateServer(expandEnv(s, `servers[${i}]`), i)];
   });
+}
+
+/**
+ * Replace `${VAR}` in every string of a raw config entry with `process.env.VAR`,
+ * so secrets can live in the environment (or `.env`) instead of `mcp.json`.
+ * An unset variable is an error naming the variable; `$${` yields a literal `${`.
+ * Applied per server after `disabled` entries are dropped, so a disabled server
+ * may reference variables that aren't set.
+ */
+function expandEnv(value: unknown, where: string): unknown {
+  if (typeof value === "string") {
+    return value.replace(/\$\$\{|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, name?: string) => {
+      if (name === undefined) return "${";
+      const v = process.env[name];
+      if (v === undefined) {
+        throw new Error(`${where} references environment variable ${name}, which is not set`);
+      }
+      return v;
+    });
+  }
+  if (Array.isArray(value)) return value.map((v, i) => expandEnv(v, `${where}[${i}]`));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, expandEnv(v, `${where}.${k}`)]),
+    );
+  }
+  return value;
 }
 
 /** Turn one raw config entry into a unified server spec. Throws on bad input. */
