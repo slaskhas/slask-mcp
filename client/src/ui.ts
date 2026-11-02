@@ -28,6 +28,7 @@ import {
   stripReasoning,
 } from "./agent.js";
 import { listModelSelections, resolveModel } from "./models.js";
+import { saveState } from "./state.js";
 import type {
   CallToolResult,
   ConversationMessage,
@@ -692,6 +693,7 @@ export async function startChat({
   maxTokens,
   selection,
   openai,
+  showTools,
 }: {
   registry: Registry;
   model: string;
@@ -700,8 +702,11 @@ export async function startChat({
   maxTokens?: number;
   selection?: string;
   openai?: InstanceType<typeof OpenAI>;
+  /** Initial `/verbose` setting (restored from saved state by the caller). */
+  showTools?: boolean;
 }): Promise<void> {
   const state = await buildChatState({ registry, model, base, apiKey, maxTokens, selection, openai });
+  state.showTools = showTools;
   // Load the catalog's `provider/id` selection list once, before the REPL
   // starts, so the readline completer (which must be synchronous — it runs
   // on each Tab, not awaited) can complete `/model` against it.
@@ -937,6 +942,7 @@ export async function startChat({
           );
           return loop();
         }
+        await saveState({ model: state.selection });
         console.log(color("green", "  model switched.\n"));
         printBanner(state, true);
         return loop();
@@ -945,8 +951,10 @@ export async function startChat({
       if (parts.length > 0 && parts[0].toLowerCase() === "/verbose") {
         process.stdout.write("\n");
         const arg = (parts[1] ?? "").toLowerCase();
-        if (arg === "on" || arg === "off") state.showTools = arg === "on";
-        else if (arg !== "") {
+        if (arg === "on" || arg === "off") {
+          state.showTools = arg === "on";
+          await saveState({ showTools: state.showTools });
+        } else if (arg !== "") {
           console.log(color("yellow", `  usage: /verbose on|off (now ${state.showTools === false ? "off" : "on"})`));
           return loop();
         }

@@ -9,8 +9,12 @@ client/models.json
 client/obscura/
 client/tmp/
 client/xx/
+client/clockify.db
+client/bedrock-eval/
 # Runtime state of the client scheduler (created on first `schedule add`; any workspace dir).
 .slask-schedule.json
+# Session state (last /model and /verbose; any workspace dir).
+.slask-state.json
 node_modules/
 .env
 
