@@ -175,6 +175,8 @@ function captureStdout(): { text: () => string; stop: () => void } {
 // ---------------------------------------------------------------------------
 // Work from a fresh, empty cwd so discoverSkills finds nothing.
 // ---------------------------------------------------------------------------
+// Also keep the real ~/.agents/skills out of discovery.
+process.env.SLASK_USER_SKILLS_DIR = "";
 const originalCwd = process.cwd();
 const workDir = join(
   tmpdir(),

@@ -337,7 +337,12 @@ Warnings about unreachable servers are printed to stderr; the exit code is 1 on 
 The client also picks up **skills**: directories under `./skills/` (the
 directory where `slask-client` was launched) containing a `SKILL.md` file —
 the same convention Claude Code uses for skills, so skills copied from
-`~/.claude/skills/` drop in unchanged.
+`~/.claude/skills/` drop in unchanged. Skills in `~/.agents/skills/` (where
+`npx skills add` installs them) are picked up too; a `./skills/` skill wins over
+a user-level one with the same name. Set `SLASK_USER_SKILLS_DIR` to use another
+directory, or to an empty string to turn user-level skills off. Every skill's
+name and description goes into the system prompt, so a large user-level
+collection costs context on small models.
 
 `SKILL.md` may start with an optional YAML frontmatter block:
 
