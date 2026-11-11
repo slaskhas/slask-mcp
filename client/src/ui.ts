@@ -37,7 +37,7 @@ import type {
   ToolCallRecord,
 } from "./types.js";
 import {
-  discoverSkills,
+  discoverAllSkills,
   invokeSkill,
   runSkillScript,
   runScriptTool,
@@ -412,7 +412,7 @@ async function buildChatState(options: {
 
   let skills: Skill[] = [];
   try {
-    skills = await discoverSkills(process.cwd());
+    skills = await discoverAllSkills(process.cwd());
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(color("red", `  ⚠ could not discover local skills: ${msg}`));

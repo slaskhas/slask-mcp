@@ -12,6 +12,7 @@ import { runAgentTurn, SYSTEM_PROMPT } from "../agent.js";
 import type { CallToolResult } from "../types.js";
 import {
   discoverSkills,
+  userSkillsDir,
   invokeSkill,
   loadSkill,
   locateScript,
@@ -616,6 +617,31 @@ const alpha = skills.find((s) => s.name === "alpha")!;
   assert(spy13[0].resultText.includes("agent"), "args missing");
   assert(answer13 && answer13.length > 0, "no answer after running a skill script");
   console.log("PASS test13 — model runs a skill script via run_skill_script");
+}
+
+// ---- 14. user-level skills dir: scanned after ./skills, project wins ----------
+{
+  const userDir = join(root, "user-skills");
+  await mkdir(join(userDir, "alpha"), { recursive: true });
+  await mkdir(join(userDir, "gamma"), { recursive: true });
+  await writeFile(join(userDir, "alpha", "SKILL.md"), "---\nname: alpha\ndescription: user alpha\n---\nuser body\n");
+  await writeFile(join(userDir, "gamma", "SKILL.md"), "---\ndescription: user gamma\n---\ngamma body\n");
+  const merged = await discoverSkills(root, [userDir, join(root, "no-such-dir")]);
+  const a = merged.find((x) => x.name === "alpha")!;
+  assert(a.dir === alphaDir, `project alpha must win: ${a.dir}`);
+  assert(merged.filter((x) => x.name === "alpha").length === 1, "duplicate alpha");
+  const g = merged.find((x) => x.name === "gamma");
+  assert(g && g.dir === join(userDir, "gamma"), "user-level gamma missing");
+
+  const saved = process.env.SLASK_USER_SKILLS_DIR;
+  process.env.SLASK_USER_SKILLS_DIR = userDir;
+  assert(userSkillsDir() === userDir, "env override ignored");
+  process.env.SLASK_USER_SKILLS_DIR = "";
+  assert(userSkillsDir() === null, "empty env should disable");
+  delete process.env.SLASK_USER_SKILLS_DIR;
+  assert(userSkillsDir()!.endsWith(join(".agents", "skills")), "default dir");
+  if (saved !== undefined) process.env.SLASK_USER_SKILLS_DIR = saved;
+  console.log("PASS test14 — user-level skills dir, project precedence, env override");
 }
 
 await rm(root, { recursive: true, force: true });

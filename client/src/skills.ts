@@ -33,6 +33,7 @@
 
 import { spawn } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve, sep } from "node:path";
 
 import type { CallToolResult, OpenAiFunctionTool } from "./types.js";
@@ -145,44 +146,67 @@ async function listScripts(skillDir: string): Promise<string[]> {
 }
 
 /**
- * Discover skills: every `skills/<dir>/SKILL.md` under `root`, best-effort
- * (missing `./skills/` => no skills, mirroring the missing-default mcp.json
- * semantics). Results are sorted by directory name; duplicate names keep the
- * first, `disabled: true` and non-directory entries are skipped. Each skill
- * also records its runnable `scripts/` entries.
+ * The user-level skills directory shared with other agents (where
+ * `npx skills add` installs): `~/.agents/skills`. `SLASK_USER_SKILLS_DIR`
+ * overrides it; set it to an empty string to disable user-level skills.
  */
-export async function discoverSkills(root: string): Promise<Skill[]> {
-  const skillsDir = join(root, "skills");
-  let entries: string[] = [];
-  try {
-    const st = await stat(skillsDir);
-    if (st.isDirectory()) {
-      entries = (await readdir(skillsDir)).filter((e) => !e.startsWith("."));
-    }
-  } catch {
-    return [];
-  }
+export function userSkillsDir(): string | null {
+  const env = process.env.SLASK_USER_SKILLS_DIR;
+  if (env !== undefined) return env.trim() === "" ? null : resolve(env);
+  return join(homedir(), ".agents", "skills");
+}
 
+/**
+ * Discover skills: every `<dir>/<name>/SKILL.md` in `<root>/skills` and then in
+ * each of `extraDirs` (e.g. the user-level dir), best-effort (a missing
+ * directory contributes nothing, mirroring the missing-default mcp.json
+ * semantics). Directories are searched in that order, so a project skill wins
+ * over a user-level skill of the same name; within a directory results are
+ * sorted by directory name. `disabled: true` and non-directory entries are
+ * skipped. Each skill also records its runnable `scripts/` entries.
+ */
+export async function discoverSkills(
+  root: string,
+  extraDirs: string[] = [],
+): Promise<Skill[]> {
   const results: Skill[] = [];
   const seen = new Set<string>();
-  for (const entry of [...entries].sort()) {
-    const raw = await readFile(join(skillsDir, entry, "SKILL.md"), "utf8").catch(() =>
-      null,
-    );
-    if (raw === null) continue;
-    const { fm } = parseFrontmatter(raw);
-    if (fm.disabled) continue;
-    const name = (fm.name ?? entry).trim();
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    results.push({
-      name,
-      description: (fm.description ?? "").trim(),
-      dir: join(skillsDir, entry),
-      scripts: await listScripts(join(skillsDir, entry)),
-    });
+  for (const skillsDir of [join(root, "skills"), ...extraDirs]) {
+    let entries: string[] = [];
+    try {
+      const st = await stat(skillsDir);
+      if (st.isDirectory()) {
+        entries = (await readdir(skillsDir)).filter((e) => !e.startsWith("."));
+      }
+    } catch {
+      continue;
+    }
+
+    for (const entry of [...entries].sort()) {
+      const raw = await readFile(join(skillsDir, entry, "SKILL.md"), "utf8").catch(() =>
+        null,
+      );
+      if (raw === null) continue;
+      const { fm } = parseFrontmatter(raw);
+      if (fm.disabled) continue;
+      const name = (fm.name ?? entry).trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      results.push({
+        name,
+        description: (fm.description ?? "").trim(),
+        dir: join(skillsDir, entry),
+        scripts: await listScripts(join(skillsDir, entry)),
+      });
+    }
   }
   return results;
+}
+
+/** Skills for the current launch directory plus the user-level directory. */
+export function discoverAllSkills(root: string): Promise<Skill[]> {
+  const user = userSkillsDir();
+  return discoverSkills(root, user === null ? [] : [user]);
 }
 
 /**

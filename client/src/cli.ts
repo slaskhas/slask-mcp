@@ -67,7 +67,7 @@ import {
 import { resolveModel } from "./models.js";
 import { loadState } from "./state.js";
 import {
-  discoverSkills,
+  discoverAllSkills,
   executeScript,
   loadSkill,
   locateScript,
@@ -282,7 +282,7 @@ function fail(msg: string): never {
 async function handleSkillCommand(config: CliConfig): Promise<void> {
   const subcmd = config.positional[1];
   const name = config.positional[2];
-  const skills = await discoverSkills(process.cwd());
+  const skills = await discoverAllSkills(process.cwd());
   if (subcmd === undefined) {
     fail(
       "usage: skill list | skill show <name> | skill run <skill> <script> [args…]",
