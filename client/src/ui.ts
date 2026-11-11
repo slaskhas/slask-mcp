@@ -73,6 +73,12 @@ import {
   ralphTools,
   runRalphRepl,
 } from "./ralph.js";
+import {
+  SUBAGENT_TOOL_NAME,
+  runSubagent,
+  subagentSystemBlock,
+  subagentTool,
+} from "./subagent.js";
 
 // ---------------------------------------------------------------------------
 // colors (tiny dependency-free ANSI helper)
@@ -523,13 +529,15 @@ export async function runTurn(
     skillSystemBlock(skills) +
     fileSystemBlock() +
     scheduleSystemBlock() +
-    ralphSystemBlock();
+    ralphSystemBlock() +
+    subagentSystemBlock();
   const tools = restrictToolsForRole([
     ...openaiTools,
     ...fileTools(),
     ...scheduleTools(),
     ...ralphTools(),
     ...(skills.length > 0 ? [skillTool(skills), runScriptTool(skills)] : []),
+    subagentTool(),
   ]);
   const callTool: (name: string, args: Record<string, unknown>) => Promise<CallToolResult> =
     (name, args) => {
@@ -555,6 +563,20 @@ export async function runTurn(
     if (name === "run_skill_script") {
       return runSkillScript(skills, args);
     }
+    if (name === SUBAGENT_TOOL_NAME) {
+      return runSubagent(
+        {
+          openai,
+          model,
+          maxTokens: state.maxTokens,
+          tools,
+          callTool,
+          mcpToolNames: new Set(openaiTools.map((t) => t.function.name)),
+          onToolCall: opts.answerOnly || state.showTools === false ? undefined : onSubagentToolCall,
+        },
+        args,
+      );
+    }
     return callToolBy(name, state.registry, args);
   };
 
@@ -563,6 +585,13 @@ export async function runTurn(
     console.log(color("yellow", `  ▸ ${rec.name}(${JSON.stringify(rec.args)})`));
     console.log(color("dim", `      ${rec.resultText.replace(/\n/g, "\n      ")}`));
     spinner.start("thinking…");
+  };
+
+  const onSubagentToolCall = (rec: ToolCallRecord) => {
+    spinner.stopDown();
+    console.log(color("yellow", `    ▹ ${rec.name}(${JSON.stringify(rec.args)})`));
+    console.log(color("dim", `        ${rec.resultText.replace(/\n/g, "\n        ")}`));
+    spinner.start("sub-agent working…");
   };
 
   const userMsg: ConversationMessage = { role: "user", content: prompt };
